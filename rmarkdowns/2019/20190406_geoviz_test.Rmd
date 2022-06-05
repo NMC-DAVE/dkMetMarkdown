@@ -1,0 +1,69 @@
+---
+title: "Test Geoviz"
+output: html_notebook
+---
+
+# Load libary
+
+[geoviz](https://github.com/neilcharles/geoviz) can download elevation data from mapbox and add satellite image over 3D surface of rayshader. 
+
+```{r}
+library(rayshader)
+library(geoviz)
+library(rgl)
+knitr::knit_hooks$set(webgl = hook_webgl)
+```
+
+# Visualize 3D topography
+下载地形数据, 目前已经支持全球地形数据.
+```{r}
+mapbox_key = "pk.eyJ1IjoiZGF2ZTIwMDQiLCJhIjoiY2lpdWR0aHBuMDAxN3Y3bHpjMzhwbTNuMSJ9.6i9qQniNRU6AM8N9H6f0zg"
+lat <- 39.990
+long <- 116.215
+square_km <- 20
+
+#Get elevation data from Mapbox
+dem <- mapbox_dem(lat, long, square_km, mapbox_key)
+```
+
+```{r}
+#Get an overlay image (Stamen for this example because it doesn't need an API key)
+overlay_image <-
+  slippy_overlay(dem, image_source = "mapbox", image_type = "satellite", png_opacity = 0.5, api_key = mapbox_key)
+
+#Optionally, turn mountainous parts of the overlay transparent
+overlay_image <-
+  elevation_transparency(overlay_image,
+                        dem,
+                        pct_alt_high = 0.5,
+                        alpha_max = 0.9)
+```
+```{r}
+#Draw the 'rayshader' scene
+elmat = matrix(
+  raster::extract(dem, raster::extent(dem), method = 'bilinear'),
+  nrow = ncol(dem),
+  ncol = nrow(dem)
+)
+
+scene <- elmat %>%
+  sphere_shade(sunangle = 270, texture = "desert") %>% 
+  add_overlay(overlay_image)
+```
+
+```{r}
+rayshader::plot_3d(
+  scene,
+  elmat,
+  #zscale = raster_zscale(dem),
+  zscale = 20,
+  solid = FALSE,
+  shadow = TRUE,
+  shadowdepth = -150
+)
+render_camera(theta = 135, phi = 25, zoom = 0.8, fov = 75)
+render_snapshot()
+#rglwidget()    # Very big file
+```
+
+

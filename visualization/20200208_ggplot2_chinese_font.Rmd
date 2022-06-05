@@ -1,0 +1,75 @@
+---
+title: "R绘图中使用中文字体"
+author: "Kan Dai"
+date: "Feb 8, 2020"
+output: 
+  html_notebook:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_section: true
+    self_contained: yes
+    css: ./data/corp-styles.css
+    highlight: pygments
+    code_folding: show
+---
+
+<img src="./data/nmc_large.png" style="position:absolute;top:10px;right:100px;" width="100" height="100"/>
+
+<hr style="height:8px;">
+
+------------------------------------------------------------------------
+
+## Load libraries
+
+```{r warning=FALSE, message=FALSE}
+library(tidyverse)
+library(lubridate)
+library(ggrepel)
+library(DT)
+library(hrbrthemes)
+library(ggthemes)
+library(showtext)
+library(nmcMetIO)
+```
+
+## 读取站点观测数据
+
+从(CIMISS气象数据库)[<http://10.20.76.55/cimissapiweb/apidataclassdefine_list.action>]上读取"中国地面逐小时资料(国家站)", 要素包括: 温度, 露点温度, 相对湿度, 1小时累积降水量, 10分钟风速平均, 10分钟风向, 10分钟最大风速.
+
+```{r, warning=FALSE, message=FALSE}
+timeRange = "[20200201000000,20200209000000]"
+dataCode = "SURF_CHN_MUL_HOR_N"
+elements = "Station_Id_d,Lat,Lon,Alti,Datetime,TEM,DPT,RHU,PRE_1h,WIN_D_Avg_10mi,WIN_S_Avg_10mi,WIN_S_Max"
+staIds = "54511"
+obsData <- cimiss_obs_by_time_range_and_staIds(timeRange,dataCode=dataCode,elements=elements,staIds=staIds)
+
+# Print the table
+datatable(obsData)
+```
+
+## 绘制双Y轴图形
+
+用ggplot2绘制不同尺度变量在同一幅图中比较困难. 目前最好的解决办法是用sec.axis这个参数, 可以参加https://rpubs.com/MarkusLoew/226759. 以需要将温度和相对湿度画在同一幅图中为例, 因为ggplot是以第一个绘制变量为y坐标范围，为此要显示第二个变量，需要把第二个变量通过变换，使 其值域范围与第一个变量一致, 当然这个变换需要保证单调性. 之后在sec.axis中设置时, 需要把变换后的第二个变量还原, 这样才能正确显示实际的第 二y坐标值.
+
+```{r fig.width=10, fig.height=6, fig.showtext=TRUE, fig.retina=1}
+showtext_auto(enable = TRUE)
+font_add("simhei", "simhei.ttf")
+
+ggplot(data=obsData, aes(x=Datetime)) + 
+  geom_line(aes(y=TEM, colour="温度"), size=1.2) +
+  geom_point(aes(y=TEM), shape = 21, colour = "#ae4544", fill = "white", size = 1.2, stroke = 1.2) +
+  geom_line(aes(y=RHU/5-10+mean(obsData$TEM), colour="相对湿度"), size=1.2) +
+  geom_point(aes(y=RHU/5-10+mean(obsData$TEM)), shape = 21, colour = "#436f82", fill = "white", size = 1.2, stroke = 1.2) +
+  scale_y_continuous(sec.axis = sec_axis(~(.+10-mean(obsData$TEM))*5, name = "相对湿度 [%]", breaks=c(0,25,50,75,100))) + 
+  scale_colour_manual(name = NULL, values = c("#ae4544", "#436f82")) +
+  scale_x_datetime(date_labels = "%m/%d", date_breaks = "1 day", date_minor_breaks="6 hours", expand=c(0,0)) +
+  guides(colour = guide_legend(nrow = 1)) +
+  labs(y = "气温 [°C]", x = "时间",
+       title = "北京气象站(54511)的温度和相对湿度观测 ",
+       subtitle = paste0("观测时段: ", strftime(min(obsData$Datetime),"%Y-%m-%dT%H:%M"), " - ",
+                         strftime(max(obsData$Datetime),"%Y-%m-%dT%H:%M")),
+       caption = "本产品由国家气象中心制作(http://www.nmc.cn/) \n 数据来源于国家信息中心CIMISS数据库 ") +
+  theme_ipsum(base_family='simhei', base_size=14, axis_title_size=14)+
+  theme(legend.position = c(0.2, -0.13))
+```

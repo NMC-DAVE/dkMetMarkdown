@@ -1,0 +1,238 @@
+---
+title: "The elevation analysis of Ultramarathon race in Baiyin, Gansu Province on May 22nd, 2021"
+output: 
+  html_notebook: 
+    fig_width: 10
+    fig_height: 8
+---
+
+-   <https://view.inews.qq.com/a/20210525A04F0L00?startextras=0_6f30003bc0aa9&from=sq_pic>
+
+-   <https://news.sina.cn/gn/2021-06-26/detail-ikqciyzk1966429.d.html?from=wap>
+
+Use the rayshader package for analysis.
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(rayshader)
+library(rayvista)
+library(leaflet)
+library(sf)
+library(raster)
+library(geosphere)
+```
+
+## 甘肃白银马拉松路经
+
+路径图像来自清华大学给出的"Gansu_Baiyin_Ultramarathon_2021.pdf"文件:
+
+-   将pdf文件转换成为png图像文件
+
+-   利用sufer软件对图像进行定标，定标信息是根据google地图进行手工确定的，信息见"points.txt"
+
+-   图像定标完成后，使用sufer的digitize功能将马拉松路径经纬度信息手工绘制提取出来，得到文件"trajectory02.dat"
+
+打开leaflet地图，叠加路径查看地图路径是否准确
+
+```{r message=TRUE, warning=FALSE}
+df_traj <- read.csv("data/baiyin/trajectory02.dat",  header = FALSE, col.names=c("lng", "lat"))
+leaflet() %>%
+    addTiles() %>%
+    addPolylines(lng=df_traj[['lng']], lat=df_traj[['lat']])
+```
+
+将路径经纬度信息转换为sf的LINESTRING对象，以便在rayshader上叠加
+
+```{r}
+df_traj <- read.csv("data/baiyin/trajectory02.dat",  header = FALSE, col.names=c("lng", "lat"))
+
+# 参考https://github.com/r-spatial/sf/issues/321
+df_traj['L1'] <- 1
+sf_traj <- sf::st_as_sf(df_traj, coords = c("lng", "lat"), crs = 4326) %>%
+    dplyr::group_by(L1) %>%
+    dplyr::summarise(do_union=FALSE) %>%
+    sf::st_cast("LINESTRING")
+
+plot(sf_traj)
+```
+
+## 绘制三维地形图
+
+读入该区域的高分辨率地形信息
+
+```{r}
+localtif = raster::raster("data/baiyin/huanghe_shilin_dem.tif")
+elmat = raster_to_matrix(localtif)
+```
+
+绘制地形阴影图像
+
+```{r fig.height=10, fig.width=13}
+base_map = elmat %>% 
+  height_shade() %>%
+  add_overlay(sphere_shade(elmat, texture = "desert", colorintensity = 5), alphalayer=0.5) %>%
+  add_shadow(lamb_shade(elmat, sunaltitude=60, zscale=5), 0) %>%
+  add_shadow(ambient_shade(elmat, zscale=5),0) %>% 
+  add_shadow(texture_shade(elmat, detail=8/10, contrast=12, brightness = 12), 0.1)
+
+plot_map(base_map)
+```
+
+叠加上水体特征,但路径越过黄河了，定位不是太准确，因此不加上水体特在。
+```{r fig.height=10, fig.width=13}
+elmat1 <- elmat
+elmat1[elmat1 < 1345] = 1345
+
+trails_layer = generate_line_overlay(sf_traj, linewidth=10, color="white", attr(localtif,"extent"), heightmap = elmat)
+
+base_map1 = elmat1 %>% 
+  height_shade() %>%
+  add_overlay(sphere_shade(elmat1, texture = "desert", colorintensity = 5), alphalayer=0.5) %>%
+  add_water(detect_water(elmat1, min_area = 100),color="imhof3") %>%
+  add_overlay(trails_layer)
+
+plot_map(base_map1)
+```
+
+
+叠加上马拉松路径图
+
+```{r fig.height=10, fig.width=13}
+trails_layer = generate_line_overlay(sf_traj, linewidth=10, color="white", attr(localtif,"extent"), heightmap = elmat)
+
+base_map %>% 
+  add_overlay(trails_layer) %>% 
+  plot_map()
+```
+
+
+
+
+绘制三维图像
+
+```{r message=TRUE, warning=FALSE, fig.height=12, fig.width=15}
+
+rgl::clear3d()
+
+base_map %>% 
+  add_overlay(trails_layer) %>%
+  plot_3d(elmat, windowsize=c(1200,800), zscale=8)
+render_camera(theta = 25, phi = 30, zoom = 0.55, fov = 60)
+
+render_label(heightmap= elmat, text='Start', lat = 36.886112, textsize=2,
+             long=104.317508-0.005, extent = attr(localtif, 'extent'), 
+             altitude=1200, zscale = 8, antialias=TRUE, textcolor="red")
+render_label(heightmap= elmat, text='CP2', lat = 36.974982, textsize=2,
+             long=104.310390+0.005, extent = attr(localtif, 'extent'), 
+             altitude=2000, zscale = 8, antialias=TRUE)
+render_label(heightmap= elmat, text='CP3', lat = 37.008361, textsize=2,
+             long=104.265080, extent = attr(localtif, 'extent'), 
+             altitude=1500, zscale = 8, antialias=TRUE)
+
+render_compass(position = "S",compass_radius=40, scale_distance = 1) 
+
+# calculate distance
+dist = distm(c(extent(localtif)[1], extent(localtif)[3]), 
+             c(extent(localtif)[1], extent(localtif)[4]), fun = distHaversine)[,1]
+render_scalebar(limits=round(dist/1000.,1),label_unit = 'km')
+
+render_snapshot("data/baiyin/map_3d.png")
+render_snapshot()
+```
+
+对图像进行渲染
+
+```{r message=TRUE, warning=FALSE, fig.height=12, fig.width=15}
+render_highquality(
+  filename="data/baiyin/map_3d_highquality.png",
+  lightdirection = c(60,120, 240), lightaltitude=c(90,25, 12), samples=1200,
+  lightintensity=c(100, 500, 450), lightcolor = c("white", "#ace5ee", "#f0ffff"),
+  text_size = 32, line_radius = 2, text_offset = c(0,20,0))
+```
+使用maptiles程序包来叠加卫星图像
+```{r}
+
+```
+
+
+
+
+下载地理信息
+
+```{r}
+.lat <- 36.93723
+.long <- 104.2355
+
+baiyin <- plot_3d_vista(lat = .lat, long = .long, radius=12000, 
+                        windowsize = c(1200, 1000), water = FALSE, 
+                        cache_dir="data/baiyin/", show_vista=FALSE)
+```
+
+构建基本地图图层
+
+```{r fig.height=12, fig.width=15}
+base_map = baiyin$dem_matrix %>% 
+  height_shade() 
+#%>%
+#  add_overlay(baiyin$texture)
+
+plot_map(base_map)
+```
+
+叠加路径到基本地图图层之上
+
+```{r fig.height=12, fig.width=15}
+
+trails_layer = generate_line_overlay(sf_traj, linewidth=10, color="white", attr(baiyin$dem_matrix,"extent"), heightmap = baiyin$dem_matrix)
+
+base_map %>% 
+  add_overlay(trails_layer) %>% 
+  plot_map()
+```
+
+绘制三维图像
+
+```{r message=TRUE, warning=FALSE, fig.height=12, fig.width=15}
+
+rgl::clear3d()
+
+base_map %>% 
+  add_overlay(trails_layer) %>%
+  plot_3d(baiyin$dem_matrix, windowsize=c(1200,1000), zscale=3)
+render_camera(theta = 25, phi = 30, zoom = 0.65, fov = 60)
+
+render_label(heightmap= baiyin$dem_matrix, text='CP2', lat = 36.975208-0.018,
+             long=104.310347+0.006, extent = attr(baiyin$dem_matrix, 'extent'), 
+             altitude=2000, zscale = 3)
+render_label(heightmap= baiyin$dem_matrix, text='CP3', lat = 37.008795-0.02,
+             long=104.269643+0.009, extent = attr(baiyin$dem_matrix, 'extent'), 
+             altitude=1500, zscale = 3)
+
+render_compass(position = "S",compass_radius=200, scale_distance = 0.8) 
+
+render_scalebar(limits=c(
+  round(dim(baiyin$dem_matrix)[2]*attr(baiyin$dem_matrix, 'resolution')/1000,1)),
+  label_unit = 'km')
+
+render_snapshot()
+```
+
+```{r message=TRUE, warning=FALSE, fig.height=12, fig.width=15}
+render_highquality(samples=200,text_size = 24, line_radius = 2, text_offset = c(0,20,0),
+                   lightdirection=180, clamp_value=10)
+```
+
+```{r fig.height=12, fig.width=15}
+
+
+base_map = elmat %>% 
+  height_shade()
+
+trails_layer = generate_line_overlay(sf_traj, linewidth=10, color="white", attr(localtif,"extent"), heightmap = elmat)
+
+base_map %>% 
+  add_overlay(trails_layer) %>% 
+  plot_map()
+
+plot_map(base_map)
+```

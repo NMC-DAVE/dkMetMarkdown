@@ -1,0 +1,37 @@
+---
+title: "Visualization of MICAPS server data"
+output: html_notebook
+---
+
+从MICAPS的Cassandra服务器上读取模式格点数据, 并用MetR软件包中函数进行处理.
+
+```{r, warning=FALSE}
+library(ggplot2)
+library(sf)
+library(metR)
+library(dkMetIO)
+library(dkMetResources)
+```
+
+读取ECMWF模式850hPa温度场数据并显示.
+
+```{r}
+data <- retrieve_micaps_model_grid("ECMWF_HR/TMP/850/", filename="19033020.024")
+head(data)
+```
+
+显示数据.
+
+```{r, warning=FALSE, message=FALSE, fig.height=8, fig.width=12}
+# get China province boundary
+cmap <- st_read(system.file("extdata/bou2_4p.shp",package="dkMetResources"), quiet=TRUE)
+
+# set temperature colors
+colors <- c("#3D0239","#FA00FC","#090079","#5E9DF8","#2E5E7F",
+            "#06F9FB","#0BF40B","#006103","#FAFB07","#D50404","#5A0303")
+ggplot() + 
+  geom_raster(data=data, aes(x=lon, y=lat, fill=var)) +
+  scale_fill_gradientn(name="Temp", colours=colors, limits=c(-20, 30)) + 
+  geom_sf(data=cmap, colour = "black", fill = NA) +
+  coord_sf(xlim=c(76, 132), ylim=c(18, 54))
+```

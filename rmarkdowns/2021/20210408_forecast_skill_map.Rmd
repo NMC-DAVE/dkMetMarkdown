@@ -1,0 +1,1297 @@
+---
+title: "中国区域降水及温度预报技巧分布图"
+author: "Kan Dai, Wei Qin, Li nina"
+date: "2021/4/8"
+CJKmainfont: Microsoft YaHei
+output:
+  pdf_document:
+    includes:
+      header-includes:
+        - \usepackage{xeCJK}
+      keep_tex: yes
+    latex_engine: xelatex
+  html_notebook: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+本文档主要用于绘制降水评分或温度误差的空间分布情况。可以作为绘制地图上散点图的例子。注意下面几个问题：
+
+-   利用sf和gemo_sf来绘制地图，coord_sf在有地图投影的时候，设置其它的地图投影，空间范围会起到不好作用，建议先把data.frame转为sf的数据结构，然后改变该结构的地图投影，并用st_crop剪裁。
+
+-   用同时设置fill和color，这样才能使得绘制的图形具有相同的颜色。
+
+-   通过scale_color_manual(name=NULL, values=values, labels=labels, drop=FALSE) + scale_fill_manual(name=NULL, values=values, labels=labels, drop=FALSE)来设置，但这里要注意有坑，要设置好drop=FALSE，因为ggplot2默认不会显示出没有类的level，这样会导致颜色标错。
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+# load libraries
+library(tidyverse)
+library(sf)
+library(ggspatial)
+library(paletteer)
+library(hrbrthemes)
+
+library(nmcMetIO)
+```
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=12, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+```
+
+## 读入和处理数据
+
+```{r message=FALSE, warning=FALSE}
+# 读入站点信息数据
+station_info <- read_micaps_3("./data/forecast_scores/stat10461.txt")
+station_info <- station_info$dataV
+station_info <- station_info %>% select(ID, lon, lat)
+head(station_info)
+```
+
+```{r}
+
+# the whole year score
+file <- "./data/forecast_scores/result/rain24/SCMOC/20200301-2021022800.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "小雨", "中雨", "大雨", "暴雨", "大暴雨", "特大暴雨",
+             "小雪", "中雪", "大雪", "暴雪", 
+             "LE0p1", "LE10", "LE25", "LE50", "LE100", "LE250",
+             "一般性降水", "暴雨雪以上", "RainOrNot")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("--", "999.900024"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% select(
+  "ID", "LE0p1", "LE10", "LE25", "LE50", "LE100", "LE250", "RainOrNot") %>%
+  inner_join(station_info, by="ID")
+
+scores
+```
+
+## 绘制降水评分分布图
+
+You can also embed plots, for example:
+
+```{r warning=FALSE, message=FALSE, fig.width=10, fig.height=8}
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map, 4326)
+
+points <- scores %>% filter(!is.na(LE50))
+#      %>% filter(LE50 >= 0.05 & LE50 <= 0.25)
+colors <- paletteer_d("ggsci::legacy_tron",7,direction=-1,type="continuous")
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_point(data=points, size=3, aes(x=lon, y=lat, color=LE50)) +
+  
+  # 对于非等间距的breaks支持并不好, 会造成颜色非常相近
+  #scale_colour_fermenter(name=NULL, breaks=c(0.005, 0.05, 0.01, 0.15, 0.20, 0.25), palette = "Accent") + 
+  
+  #scale_color_binned(name=NULL, breaks=c(0.005, 0.05, 0.01, 0.15, 0.20, 0.25), type="viridis") +
+  
+  # scale_color_stepn这个函数绘制的图像一直不对
+  # 可以参考https://stackoverflow.com/questions/66318404/how-to-use-specific-filling-colors-when-using-scale-fill-binned?noredirect=1&lq=1
+  # 但比较复杂.
+  #scale_color_stepsn(name=NULL, breaks=c(0.005, 0.05, 0.1, 0.15, 0.20, 0.25), limits=c(0,0.3),
+  #                   values=scales::rescale(c(0.0025, 0.275, 0.75, 0.125,0.175,0.225,0.275),from=c(0,0.3)),
+  #                   colours=paletteer_d("ggsci::legacy_tron",7,direction=-1,type="continuous"),
+  #                   na.value = "white")+
+  #scale_color_stepsn(name=NULL, breaks=c(0.005, 0.05, 0.1, 0.15, 0.20, 0.25), limits=c(0.005,0.25),
+  #                  values=scales::rescale(c(0.005, 0.05, 0.1, 0.15, 0.20, 0.25)),
+  #                  colours=paletteer_d("ggsci::legacy_tron",5,direction=-1,type="continuous"),
+  #                  na.value = "white")+
+
+  # 这个解决方案是目标最稳妥的解决方案参考
+  # https://stackoverflow.com/questions/65627153/specify-bin-colours-in-binned-colour-fill-scales
+  binned_scale("color", "foo", ggplot2:::binned_pal(scales::manual_pal(colors)),
+               guide="coloursteps", breaks=c(0.005, 0.05, 0.1, 0.15, 0.20, 0.25),
+               limits=c(0.0,1.0), show.limits=TRUE) + 
+  
+  #guides(fill = guide_legend(nrow = 1, override.aes=list(size=10))) + 
+  coord_sf(expand = FALSE, ylim=c(25,30), xlim=c(110, 120)) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国定量降水预报评分分布图",
+       subtitle = "2020年3月至2021年2月全国10246站暴雨(>=50mm)TS评分",
+       caption = "Origin: National Meteorological Center NMC-WFT, 检验大数据分析平台(http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE) +
+  theme(legend.position = "right")
+```
+
+试验geom_sf和geom_point混合使用
+
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE}
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map, 4326)
+
+points <- scores %>% filter(!is.na(LE50))
+
+colors <- paletteer::paletteer_d("ggsci::legacy_tron",7,direction=-1,type="continuous")
+
+ggplot() +
+  geom_sf(data=china_map, fill="white", size=0.1) +
+  geom_point(data=points, size=0.6, aes(x=lon, y=lat, color=LE50)) +
+  
+  # 这个解决方案是目标最稳妥的解决方案参考
+  # https://stackoverflow.com/questions/65627153/specify-bin-colours-in-binned-colour-fill-scales
+  binned_scale("color", "foo", ggplot2:::binned_pal(scales::manual_pal(colors)),
+               guide="coloursteps", breaks=c(0.005, 0.05, 0.1, 0.15, 0.20, 0.25),
+               limits=c(0.0,1.0), show.limits=TRUE) + 
+  #guides(fill = guide_legend(nrow = 1, override.aes=list(size=10))) + 
+  coord_sf(crs=st_crs(4508), expand = FALSE, xlim=c(90,124), ylim=c(20, 44), default=TRUE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国定量降水预报评分分布图",
+       subtitle = "2020年3月至2021年2月全国10246站暴雨(>=50mm)TS评分",
+       caption = "Origin: National Meteorological Center NMC-WFT, 检验大数据分析平台(http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE) +
+  theme(legend.position = "right")
+
+```
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 0.01, 0.1, 0.2, 0.4, 0.6, Inf)
+points <- filter(points, !is.na(points$LE50)) %>%
+  mutate(LE50=cut(LE50,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+
+values <- c("Gray","#F6F964","#007500","blue","magenta","#F01400")
+labels <- levels(points$LE50)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=LE50, color=LE50)) +
+  scale_color_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国定量降水预报质量分布图",
+       subtitle = "2020年3月1日至2021年2月28日全国10246站24h时效暴雨(>=50mm)TS评分",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+```
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 50, 60, 70, 80, 90, Inf)
+points <- filter(points, !is.na(points$RainOrNot)) %>%
+  mutate(RainOrNot=cut(RainOrNot,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+values <- rev(c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33'))
+labels <- levels(points$RainOrNot)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=RainOrNot, color=RainOrNot)) +
+  scale_color_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国定量降水预报质量分布图",
+       subtitle = "2020年3月1日至2021年2月28日全国10246站24h时效晴雨准确率评分(%)",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+```
+
+## 各个季节的降水预报质量
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+
+#===============================
+#
+#  春季预报质量
+#===============================
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/rain24/SCMOC/20200301-2020053100.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "小雨", "中雨", "大雨", "暴雨", "大暴雨", "特大暴雨",
+             "小雪", "中雪", "大雪", "暴雪", 
+             "LE0p1", "LE10", "LE25", "LE50", "LE100", "LE250",
+             "一般性降水", "暴雨雪以上", "RainOrNot")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("--", "999.900024"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% select(
+  "ID", "LE0p1", "LE10", "LE25", "LE50", "LE100", "LE250", "RainOrNot") %>%
+  inner_join(station_info, by="ID")
+
+
+#
+#  绘制强降水预报质量分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 0.01, 0.1, 0.2, 0.4, 0.6, Inf)
+points <- filter(points, !is.na(points$LE25)) %>%
+  mutate(LE50=cut(LE25,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+
+values <- c("Gray","#F6F964","#007500","blue","magenta","#F01400")
+labels <- levels(points$LE50)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=LE50, color=LE50)) +
+  scale_color_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国定量降水预报评分分布图",
+       subtitle = "2020年3月1日至2020年5月31日全国10246站24h时效大雨(>=25mm)TS评分",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+
+#
+#  绘制晴雨预报质量分布图
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 50, 60, 70, 80, 90, Inf)
+points <- filter(points, !is.na(points$RainOrNot)) %>%
+  mutate(RainOrNot=cut(RainOrNot,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+values <- rev(c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33'))
+labels <- levels(points$RainOrNot)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=RainOrNot, color=RainOrNot)) +
+  scale_color_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国定量降水预报质量分布图",
+       subtitle = "2020年3月1日至2020年5月31日全国10246站24h时效晴雨准确率评分",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+```
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+
+#===============================
+#
+#  夏季预报质量
+#===============================
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/rain24/SCMOC/20200601-2020083100.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "小雨", "中雨", "大雨", "暴雨", "大暴雨", "特大暴雨",
+             "小雪", "中雪", "大雪", "暴雪", 
+             "LE0p1", "LE10", "LE25", "LE50", "LE100", "LE250",
+             "一般性降水", "暴雨雪以上", "RainOrNot")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("--", "999.900024"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% select(
+  "ID", "LE0p1", "LE10", "LE25", "LE50", "LE100", "LE250", "RainOrNot") %>%
+  inner_join(station_info, by="ID")
+
+
+#
+#  绘制强降水预报质量分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 0.01, 0.1, 0.2, 0.4, 0.6, Inf)
+points <- filter(points, !is.na(points$LE50)) %>%
+  mutate(LE50=cut(LE50,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+
+values <- c("Gray","#F6F964","#007500","blue","magenta","#F01400")
+labels <- levels(points$LE50)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=LE50, color=LE50)) +
+  scale_color_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国定量降水预报评分分布图",
+       subtitle = "2020年6月1日至2020年8月31日全国10246站24h时效暴雨(>=50mm)TS评分",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+
+#
+#  绘制晴雨预报质量分布图
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 50, 60, 70, 80, 90, Inf)
+points <- filter(points, !is.na(points$RainOrNot)) %>%
+  mutate(RainOrNot=cut(RainOrNot,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+values <- rev(c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33'))
+labels <- levels(points$RainOrNot)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=RainOrNot, color=RainOrNot)) +
+  scale_color_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国定量降水预报质量分布图",
+       subtitle = "2020年6月1日至2020年8月31日全国10246站24h时效晴雨准确率评分",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+```
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+
+#===============================
+#
+#  秋季预报质量
+#===============================
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/rain24/SCMOC/20200901-2020113000.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "小雨", "中雨", "大雨", "暴雨", "大暴雨", "特大暴雨",
+             "小雪", "中雪", "大雪", "暴雪", 
+             "LE0p1", "LE10", "LE25", "LE50", "LE100", "LE250",
+             "一般性降水", "暴雨雪以上", "RainOrNot")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("--", "999.900024"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% select(
+  "ID", "LE0p1", "LE10", "LE25", "LE50", "LE100", "LE250", "RainOrNot") %>%
+  inner_join(station_info, by="ID")
+
+
+#
+#  绘制强降水预报质量分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 0.01, 0.1, 0.2, 0.4, 0.6, Inf)
+points <- filter(points, !is.na(points$LE25)) %>%
+  mutate(LE50=cut(LE25,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+
+values <- c("Gray","#F6F964","#007500","blue","magenta","#F01400")
+labels <- levels(points$LE50)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=LE50, color=LE50)) +
+  scale_color_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国定量降水预报评分分布图",
+       subtitle = "2020年9月1日至2020年11月30日全国10246站24h时效大雨(>=25mm)TS评分",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+
+#
+#  绘制晴雨预报质量分布图
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 50, 60, 70, 80, 90, Inf)
+points <- filter(points, !is.na(points$RainOrNot)) %>%
+  mutate(RainOrNot=cut(RainOrNot,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+values <- rev(c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33'))
+labels <- levels(points$RainOrNot)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=RainOrNot, color=RainOrNot)) +
+  scale_color_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国定量降水预报质量分布图",
+       subtitle = "2020年9月1日至2020年11月30日全国10246站24h时效晴雨准确率评分",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+```
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+
+#===============================
+#
+#  冬季预报质量
+#===============================
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/rain24/SCMOC/20201201-2021022800.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "小雨", "中雨", "大雨", "暴雨", "大暴雨", "特大暴雨",
+             "小雪", "中雪", "大雪", "暴雪", 
+             "LE0p1", "LE10", "LE25", "LE50", "LE100", "LE250",
+             "一般性降水", "暴雨雪以上", "RainOrNot")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("--", "999.900024"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% select(
+  "ID", "LE0p1", "LE10", "LE25", "LE50", "LE100", "LE250", "RainOrNot") %>%
+  inner_join(station_info, by="ID")
+
+
+#
+#  绘制强降水预报质量分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 0.01, 0.1, 0.2, 0.4, 0.6, Inf)
+points <- filter(points, !is.na(points$LE25)) %>%
+  mutate(LE50=cut(LE25,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+values <- c("Gray","#F6F964","#007500","blue","magenta","#F01400")
+labels <- levels(points$LE50)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=LE50, color=LE50)) +
+  scale_color_manual(name=NULL, values=values, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国定量降水预报评分分布图",
+       subtitle = "2020年12月1日至2021年2月28日全国10246站24h时效大雨(>=25mm)TS评分",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+
+#
+#  绘制晴雨预报质量分布图
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 50, 60, 70, 80, 90, Inf)
+points <- filter(points, !is.na(points$RainOrNot)) %>%
+  mutate(RainOrNot=cut(RainOrNot,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+values <- rev(c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33'))
+labels <- levels(points$RainOrNot)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=RainOrNot, color=RainOrNot)) +
+  scale_color_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, labels=labels, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国定量降水预报质量分布图",
+       subtitle = "2020年12月1日至2021年2月28日全国10246站24h时效晴雨准确率评分",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+
+```
+
+## 高温/低温预报准确率
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+
+#===============================
+#
+#  全年预报质量
+#===============================
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/tmx-neib-height/SCMOC/20200301-2021022800.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "MAE")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("999.9"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% inner_join(station_info, by="ID")
+
+
+#
+#  绘制高温预报误差分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 1.0, 1.4, 1.6, 2.0, 2.5, 3.0, Inf)
+points <- filter(points, !is.na(points$MAE)) %>%
+  mutate(MAE=cut(MAE,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+values <- c('#a6cee3','#1f78b4','#b2df8a','#33a02c','#fb9a99','#e31a1c','#fdbf6f')
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=MAE, color=MAE)) +
+  scale_color_manual(name=NULL, values=values, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国日最高气温预报误差分布图",
+       subtitle = "2020年3月1日至2021年2月28日全国10246站24h时效日最高温平均绝对误差(度)",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/tmi-neib-height/SCMOC/20200301-2021022800.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "MAE")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("--", "999.9"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% inner_join(station_info, by="ID")
+
+#
+#  绘制低温预报误差分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 1.0, 1.4, 1.6, 2.0, 2.5, 3.0, Inf)
+points <- filter(points, !is.na(points$MAE)) %>%
+  mutate(MAE=cut(MAE,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+values <- c('#a6cee3','#1f78b4','#b2df8a','#33a02c','#fb9a99','#e31a1c','#fdbf6f')
+labels <- levels(points$MAE)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=MAE, color=MAE)) +
+  scale_color_manual(name=NULL, values=values, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国日最低气温预报误差分布图",
+       subtitle = "2020年3月1日至2021年2月28日全国10246站24h时效日最低温平均绝对误差(度)",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+```
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+
+#===============================
+#
+#  春季预报质量
+#===============================
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/tmx-neib-height/SCMOC/20200301-2020053100.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "MAE")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("999.9"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% inner_join(station_info, by="ID")
+
+
+#
+#  绘制高温预报误差分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 1.0, 1.4, 1.6, 2.0, 2.5, 3.0, Inf)
+points <- filter(points, !is.na(points$MAE)) %>%
+  mutate(MAE=cut(MAE,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+values <- c('#a6cee3','#1f78b4','#b2df8a','#33a02c','#fb9a99','#e31a1c','#fdbf6f')
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=MAE, color=MAE)) +
+  scale_color_manual(name=NULL, values=values, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国日最高气温预报误差分布图",
+       subtitle = "2020年3月1日至2020年5月31日全国10246站24h时效日最高温平均绝对误差(度)",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/tmi-neib-height/SCMOC/20200301-2020053100.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "MAE")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("--", "999.9"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% inner_join(station_info, by="ID")
+
+#
+#  绘制低温预报误差分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 1.0, 1.4, 1.6, 2.0, 2.5, 3.0, Inf)
+points <- filter(points, !is.na(points$MAE)) %>%
+  mutate(MAE=cut(MAE,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+values <- c('#a6cee3','#1f78b4','#b2df8a','#33a02c','#fb9a99','#e31a1c','#fdbf6f')
+labels <- levels(points$MAE)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=MAE, color=MAE)) +
+  scale_color_manual(name=NULL, values=values, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国日最低气温预报误差分布图",
+       subtitle = "2020年3月1日至2020年5月31日全国10246站24h时效日最低温平均绝对误差(度)",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+
+```
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+
+#===============================
+#
+#  夏季预报质量
+#===============================
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/tmx-neib-height/SCMOC/20200601-2020083100.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "MAE")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("999.9"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% inner_join(station_info, by="ID")
+
+
+#
+#  绘制高温预报误差分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 1.0, 1.4, 1.6, 2.0, 2.5, 3.0, Inf)
+points <- filter(points, !is.na(points$MAE)) %>%
+  mutate(MAE=cut(MAE,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+values <- c('#a6cee3','#1f78b4','#b2df8a','#33a02c','#fb9a99','#e31a1c','#fdbf6f')
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=MAE, color=MAE)) +
+  scale_color_manual(name=NULL, values=values, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国日最高气温预报误差分布图",
+       subtitle = "2020年6月1日至2020年8月31日全国10246站24h时效日最高温平均绝对误差(度)",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/tmi-neib-height/SCMOC/20200601-2020083100.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "MAE")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("--", "999.9"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% inner_join(station_info, by="ID")
+
+#
+#  绘制低温预报误差分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 1.0, 1.4, 1.6, 2.0, 2.5, 3.0, Inf)
+points <- filter(points, !is.na(points$MAE)) %>%
+  mutate(MAE=cut(MAE,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+values <- c('#a6cee3','#1f78b4','#b2df8a','#33a02c','#fb9a99','#e31a1c','#fdbf6f')
+labels <- levels(points$MAE)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=MAE, color=MAE)) +
+  scale_color_manual(name=NULL, values=values, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国日最低气温预报误差分布图",
+       subtitle = "2020年6月1日至2020年8月31日全国10246站24h时效日最低温平均绝对误差(度)",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+
+```
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+
+#===============================
+#
+#  秋季预报质量
+#===============================
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/tmx-neib-height/SCMOC/20200901-2020113000.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "MAE")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("999.9"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% inner_join(station_info, by="ID")
+
+
+#
+#  绘制高温预报误差分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 1.0, 1.4, 1.6, 2.0, 2.5, 3.0, Inf)
+points <- filter(points, !is.na(points$MAE)) %>%
+  mutate(MAE=cut(MAE,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+values <- c('#a6cee3','#1f78b4','#b2df8a','#33a02c','#fb9a99','#e31a1c','#fdbf6f')
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=MAE, color=MAE)) +
+  scale_color_manual(name=NULL, values=values, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国日最高气温预报误差分布图",
+       subtitle = "2020年9月1日至2020年11月30日全国10246站24h时效日最高温平均绝对误差(度)",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/tmi-neib-height/SCMOC/20200901-2020113000.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "MAE")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("--", "999.9"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% inner_join(station_info, by="ID")
+
+#
+#  绘制低温预报误差分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 1.0, 1.4, 1.6, 2.0, 2.5, 3.0, Inf)
+points <- filter(points, !is.na(points$MAE)) %>%
+  mutate(MAE=cut(MAE,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+values <- c('#a6cee3','#1f78b4','#b2df8a','#33a02c','#fb9a99','#e31a1c','#fdbf6f')
+labels <- levels(points$MAE)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=MAE, color=MAE)) +
+  scale_color_manual(name=NULL, values=values, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国日最低气温预报误差分布图",
+       subtitle = "2020年9月1日至2020年11月30日全国10246站24h时效日最低温平均绝对误差(度)",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+```
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+
+#===============================
+#
+#  冬季预报质量
+#===============================
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/tmx-neib-height/SCMOC/20201201-2021022800.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "MAE")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("999.9"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% inner_join(station_info, by="ID")
+
+
+#
+#  绘制高温预报误差分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 1.0, 1.4, 1.6, 2.0, 2.5, 3.0, Inf)
+points <- filter(points, !is.na(points$MAE)) %>%
+  mutate(MAE=cut(MAE,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+values <- c('#a6cee3','#1f78b4','#b2df8a','#33a02c','#fb9a99','#e31a1c','#fdbf6f')
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=MAE, color=MAE)) +
+  scale_color_manual(name=NULL, values=values, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国日最高气温预报误差分布图",
+       subtitle = "2020年12月1日至2021年2月28日全国10246站24h时效日最高温平均绝对误差(度)",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+
+
+
+#
+#  读入数据文件
+
+# the score data
+file <- "./data/forecast_scores/result/tmi-neib-height/SCMOC/20201201-2021022800.024"
+
+# 读入数据, ID为字符型, 以便与station_info对应.
+col_names <- c("ID", "MAE")
+col_types=cols(.default = col_double(), "ID"=col_character())
+scores <-  read_delim(file, delim="\t", col_names=col_names,
+                      na=c("--", "999.9"), col_types=col_types)
+
+# 只使用后面几列的数据, 并结合站点经纬度信息
+scores <- scores %>% inner_join(station_info, by="ID")
+
+#
+#  绘制低温预报误差分布图
+
+# map background
+china_map <- st_read(
+  system.file("extdata/bou2_4p.shp", package="nmcMetResources"), 
+  stringsAsFactors=FALSE, quiet=TRUE)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_transform(china_map, 4508)
+
+points <- st_as_sf(scores, coords = c("lon", "lat"), crs=4326)
+breaks <- c(-Inf, 1.0, 1.4, 1.6, 2.0, 2.5, 3.0, Inf)
+points <- filter(points, !is.na(points$MAE)) %>%
+  mutate(MAE=cut(MAE,breaks,right=FALSE))
+points <- st_crop(points, xmin=73, xmax=135, ymin=17, ymax=54)
+points <- st_transform(points, 4508)
+
+values <- c('#a6cee3','#1f78b4','#b2df8a','#33a02c','#fb9a99','#e31a1c','#fdbf6f')
+labels <- levels(points$MAE)
+
+ggplot() +
+  geom_sf(data=china_map, fill="antiquewhite1") +
+  geom_sf(data=points, shape=23, size=0.6, alpha=0.8,
+          aes(fill=MAE, color=MAE)) +
+  scale_color_manual(name=NULL, values=values, drop=FALSE) +
+  scale_fill_manual(name=NULL, values=values, drop=FALSE) +
+  guides(color = guide_legend(nrow = 1, override.aes=list(size=12))) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "全国日最低气温预报误差分布图",
+       subtitle = "2020年12月1日至2021年2月28日全国10246站24h时效日最低温平均绝对误差(度)",
+       caption = "Origin: NMC-WFT 检验大数据分析平台 (http://10.1.64.146/nvsnew)") +
+  theme_ipsum_rc(grid=TRUE, base_size=12, 
+                 plot_title_size=24, subtitle_size=18, caption_size=12) +
+  theme(legend.position = "top", legend.text = element_text(size=12))
+
+```

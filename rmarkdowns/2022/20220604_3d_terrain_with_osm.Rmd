@@ -1,0 +1,192 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+利用`{rayshader}`生成全球任意位置的三维地形图.
+
+## Load libraries
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(osmdata)
+library(sf)
+library(rayshader)
+library(raster)
+library(elevatr)
+```
+
+## Create Bounding Box
+
+定义地理区域范围.
+
+```{r message=FALSE, warning=FALSE}
+
+# map center longitude and latitude
+center_lon_lat <- c(102.929, 30.150)
+half_width <- 0.05
+
+med_bbox <- st_bbox(c(xmin = center_lon_lat[1]-half_width, xmax = center_lon_lat[1]+half_width, 
+                      ymin = center_lon_lat[2]-half_width, ymax = center_lon_lat[2]+half_width),
+                      crs = 4326)
+
+med_bbox_df <- data.frame(x = c(center_lon_lat[1]-half_width, center_lon_lat[1]+half_width),
+                          y = c(center_lon_lat[2]-half_width, center_lon_lat[2]+half_width))
+
+
+extent_zoomed <- raster::extent(med_bbox)
+```
+
+## Get elevation data
+
+利用`{elevatr}`下载地形数据.
+
+```{r message=FALSE, warning=FALSE}
+prj_dd <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+
+elev_med <- get_elev_raster(med_bbox_df, prj=prj_dd, z=12, clip="bbox")
+
+elev_med_mat <- raster_to_matrix(elev_med)
+```
+
+## Get OpenStreetMap(OSM) data
+
+从OpenStreetMap获得地理信息数据
+
+```{r message=FALSE, warning=FALSE}
+
+# Get highway data
+# https://wiki.openstreetmap.org/wiki/Map_features#Highway
+med_highway <- med_bbox %>%  opq() %>%
+  add_osm_feature("highway") %>%
+  osmdata_sf()
+med_highway_lines <- med_highway$osm_lines
+
+# Get river data
+# https://wiki.openstreetmap.org/wiki/Map_features#Waterway
+med_rivers <- med_bbox %>% opq() %>%
+  add_osm_feature("waterway") %>%
+  osmdata_sf()
+med_river_lines <- med_rivers$osm_lines
+
+# Get buildings data
+med_buildings <- med_bbox %>% opq() %>%
+  add_osm_feature("building") %>%
+  osmdata_sf()
+med_building_polygons <- med_buildings$osm_polygons
+
+# Get parkings data
+med_parkdings <- med_bbox %>% opq() %>%
+  add_osm_feature("parking") %>%
+  osmdata_sf()
+med_parking_polygons <- med_parkdings$osm_polygons
+
+# Get tourism data
+med_tourisms <- med_bbox %>% opq() %>%
+  add_osm_feature("tourism") %>%
+  osmdata_sf()
+med_tourism_polygons <- med_tourisms$osm_polygons
+
+# Get place data
+med_places <- med_bbox %>% opq() %>%
+  add_osm_feature("place") %>%
+  osmdata_sf()
+med_places_points <- med_places$osm_points %>%
+  filter(place %in% c("town","city"))
+```
+
+## Draw base map
+
+```{r fig.height=10, fig.width=10, message=FALSE, warning=FALSE}
+base_map <- elev_med_mat %>% 
+  height_shade() %>%
+  add_overlay(sphere_shade(elev_med_mat, texture = "desert", colorintensity = 5), alphalayer=0.5) %>%
+  add_shadow(lamb_shade(elev_med_mat), 0) %>%
+  add_shadow(ambient_shade(elev_med_mat),0) %>% 
+  add_shadow(texture_shade(elev_med_mat,detail=8/10,contrast=9,brightness = 11), 0.1)
+
+plot_map(base_map)
+```
+
+## Add OpenStreetMap(OSM) data
+
+```{r message=FALSE, warning=FALSE}
+
+# create highway layer
+med_road_01 <- med_highway_lines %>%
+  filter(highway %in% c("motorway","trunk","primary"))
+med_road_02 <- med_highway_lines %>%
+  filter(highway %in% c("secondary","tertiary"))
+med_road_03 <- med_highway_lines %>%
+  filter(highway %in% c("unclassified","residential"))
+
+road_layer <- generate_line_overlay(med_road_03,extent = extent_zoomed,
+                                    linewidth = 2, color="white", 
+                                    heightmap = elev_med_mat) %>% 
+  add_overlay(generate_line_overlay(med_road_02,extent = extent_zoomed,
+                                    linewidth = 1, color="white", lty=3,
+                                    heightmap = elev_med_mat)) %>% 
+  add_overlay(generate_line_overlay(med_road_01,extent = extent_zoomed,
+                                    linewidth = 3, color="white",
+                                    heightmap = elev_med_mat))
+```
+
+
+```{r message=FALSE, warning=FALSE}
+
+# create wateray layer
+med_river_01 <- med_river_lines %>%
+  filter(waterway %in% c("river"))
+med_river_02 <- med_river_lines %>%
+  filter(!waterway %in% c("river"))
+
+water_layer <- generate_line_overlay(med_river_01,extent = extent_zoomed,
+                                     linewidth = 2, color="skyblue2", 
+                                     heightmap = elev_med_mat) %>%
+  add_overlay(generate_line_overlay(med_river_02,extent = extent_zoomed,
+                                    linewidth = 1, color="skyblue2", lty=3,
+                                    heightmap = elev_med_mat))
+```
+
+
+```{r}
+# polygon_layer = generate_polygon_overlay(med_parking_polygons, extent = extent_zoomed,
+#                                          heightmap = elev_med_mat, palette="grey30") %>%
+#   add_overlay(generate_polygon_overlay(med_building_polygons, extent = extent_zoomed,
+#                                        heightmap = elev_med_mat, palette="darkred")) %>% 
+#   add_overlay(generate_polygon_overlay(med_tourism_polygons, extent = extent_zoomed,
+#                                        heightmap = elev_med_mat, palette="darkgreen"), alphalayer = 0.6)
+polygon_layer = generate_polygon_overlay(med_building_polygons, extent = extent_zoomed,
+                                       heightmap = elev_med_mat, palette="darkred")
+```
+
+
+
+```{r fig.height=6, fig.width=6, message=FALSE, warning=FALSE}
+
+base_map %>% 
+  add_overlay(polygon_layer) %>%
+  add_overlay(water_layer, alphalayer = 0.8) %>% 
+  add_overlay(road_layer) %>%
+  add_overlay(generate_label_overlay(med_places_points, extent = extent_zoomed,
+                                     text_size = 1, point_size = 1, color = "white",
+                                     halo_color = "black", halo_expand = 10, 
+                                     halo_blur = 20, halo_alpha = 0.8,
+                                     seed=1, heightmap = elev_med_mat, data_label_column = "name.en")) %>%
+  plot_map()
+```
+
+
+```{r}
+base_map %>% 
+  add_overlay(polygon_layer) %>%
+  add_overlay(water_layer, alphalayer = 0.8) %>% 
+  add_overlay(road_layer) %>%
+  add_overlay(generate_label_overlay(med_places_points, extent = extent_zoomed,
+                                     text_size = 1, point_size = 1, color = "white",
+                                     halo_color = "black", halo_expand = 10, 
+                                     halo_blur = 15, halo_alpha = 0.8,
+                                     seed=1, heightmap = elev_med_mat, data_label_column = "name.en")) %>%
+  plot_3d(elev_med_mat, windowsize=c(1200,1100), zscale=20, theta=20, phi=30, fov=45, zoom=0.6)
+```
+

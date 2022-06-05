@@ -1,0 +1,303 @@
+---
+title: "2022年冬季奥运会比赛场地分析"
+output:
+  word_document: default
+  html_notebook: default
+  pdf_document:
+    includes:
+      header-includes: \usepackage{xeCJK}
+    keep_tex: yes
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+CJKmainfont: Microsoft YaHei
+---
+
+## 概况
+    2022年2月4日至2月20日，第24届冬奥会将在北京市和张家口市联合举行。北京将承办所有冰上项目，延庆和张家口将承办所有的雪上项目。
+
+### Setup
+
+```{r warning=FALSE, message=FALSE}
+library(leaflet)
+library(raster)
+library(sp)
+library(rayshader)
+library(geoviz)
+library(nmcMetIO)
+```
+
+
+## 延庆赛区
+    延庆赛区的场馆主要有小海坨高山滑雪场、国家雪车雪橇中心、奥运村及媒体中心。国家高山滑雪中心将规划设置两条比赛道、两条训练道和一条技术服务道，冬奥会和冬残奥会的全部高山滑雪项目比赛都将在这里举行。国家雪车雪橇中心将进行雪车、钢架雪车和雪橇三个项目共9个小项的比赛。
+
+![小海坨高山滑雪场](./data/winter_olympic/延庆赛区01.jpg)
+
+### 小海坨高山滑雪场及其观测站点位置
+  调用leaflet来显示小海坨高山滑雪场的位置及气象观测站的分布位置.
+```{r warning=FALSE, message=FALSE}
+# define locations
+bbox = list(p1 = list(long = 115.7071, lat = 40.47944),
+            p2 = list(long = 115.8847, lat = 40.58149))
+point = list(lon=115.792477, lat=40.535202)
+
+# 观测站点位置
+points1 = list(lon=c(115.8136111, 115.8036111, 115.8033333, 115.7977778),
+               lat=c(40.55861111, 40.55583333, 40.54972222, 40.54111111))
+points1_label = c('A1701', 'A1703', 'A1705', 'A1708')
+points2 = list(lon=c(115.815, 115.8133333, 115.8069444),
+               lat=c(40.55194444, 40.54972222, 40.5475))
+points2_label = c('A1710', 'A1711', 'A1712')
+points3 = list(lon=c(115.7825), lat=c(40.5202777777778))
+points3_label = c('A1489')
+
+# show the selected region for olympic region
+icon1 <- makeAwesomeIcon(icon= 'flag', markerColor = 'red', iconColor = 'black')
+icon2 <- makeAwesomeIcon(icon= 'flag', markerColor = 'green', iconColor = 'black')
+icon3 <- makeAwesomeIcon(icon= 'home', markerColor = 'orange', iconColor = 'black')
+leaflet(width = "100%") %>%
+  addProviderTiles(providers$Esri.WorldTopoMap) %>% 
+  addRectangles(
+    lng1 = bbox$p1$long, lat1 = bbox$p1$lat, lng2 = bbox$p2$long, lat2 = bbox$p2$lat, fillColor="transparent") %>%
+  addMarkers(
+    lng=point$lon, lat=point$lat, label="小海坨高山滑雪场") %>%
+  addAwesomeMarkers(
+    lng=points1$lon, lat=points1$lat, icon=icon1, label=points1_label) %>%
+  addAwesomeMarkers(
+    lng=points2$lon, lat=points2$lat, icon=icon2, label=points2_label) %>%
+  addAwesomeMarkers(
+    lng=points3$lon, lat=points3$lat, icon=icon3, label=points3_label) %>%
+  fitBounds(
+    lng1 = bbox$p1$long, lat1 = bbox$p1$lat, lng2 = bbox$p2$long, lat2 = bbox$p2$lat,
+  )
+```
+
+### 下载地形数据
+    通过geovis从Mapzen上下载高分辨率的地形数据.
+```{r warning=FALSE, message=FALSE}
+#Get elevation data from Mapzen
+datafile <- "data/winter_olympic/xiaohaituo_dem_01.rds"
+if(!file.exists(datafile)){
+  square_km <- 4.5
+  max_tiles <- 30
+  dem <- mapzen_dem(point$lat, point$lon, square_km, max_tiles = max_tiles)
+  saveRDS(dem, datafile)
+}
+dem <- readRDS(datafile)
+
+# convert to matrix
+elmat = raster_to_matrix(dem)
+```
+
+### 处理卫星影像数据
+    通过geovis自带的slippy_overlay函数无法获得超高分辨率卫星影像图像. 目前采用"BIGEMAP地图下载器"下载指定范围内的Google高清影像图, 但未经授权会导致叠加水印. 采用变通办法是直接屏幕截图, 步骤是先选定要下载范围的矩形框, 然后在屏幕上定位矩形两个对角, 然后右键撤销矩形区域, 之后用屏幕截图软件把图像截取下来, 存成png文件. 为了提高图形亮度, 采用图像软件(如snagit editor), 选择颜色调整, 调整Contract和Gamma参数即可.
+
+```{r warning=FALSE, message=FALSE}
+# Read satellite image
+overlay_file <- "data/winter_olympic/xiaohaituo_02_map.png"
+overlay_img <- png::readPNG(overlay_file)
+```
+
+### 显示三维地形数据
+
+```{r warning=FALSE, message=FALSE}
+zscale = 30
+ray_shadow <- ray_shade(elmat, sunaltitude = 20, zscale = zscale, lambert = FALSE)
+lamb_shadow <- lamb_shade(elmat, sunaltitude = 20, zscale = zscale)
+```
+
+```{r warning=FALSE, message=FALSE, fig.height=10, fig.width=15}
+rgl::clear3d()
+elmat %>%
+  sphere_shade() %>%
+  add_overlay(overlay_img, alphalayer = 0.95) %>%
+  add_shadow(ray_shadow, max_darken=0.5) %>%
+  add_shadow(lamb_shadow, max_darken=0.5) %>%
+  plot_3d(elmat, zscale = 10,windowsize = c(1500,1000), 
+          theta = -5, phi = 38, zoom = 0.52, fov = 60,
+          background = "grey40", shadowcolor = "grey10", 
+          soliddepth = -30, shadowdepth = -50)
+Sys.sleep(5)
+render_snapshot(title_text = "Xiaohaituo Alpine Ski Resort in Yanqing \n2022 Beijing Winter Olympic",
+                title_size = 50, title_color = "grey90")
+```
+```{r warning=FALSE, message=FALSE, fig.height=10, fig.width=15}
+
+for(i in 1:length(points1_label)){
+  label <- list(text=points1_label[i])
+  label$pos <- find_image_coordinates(long=points1$lon[i], lat=points1$lat[i], bbox=bbox, 
+                                      image_width=dim(elmat)[1], image_height=dim(elmat)[2])
+  render_label(elmat, x = label$pos$x, y = label$pos$y, z = 8500,
+               zscale = zscale, text = label$text, textsize=2, linewidth = 4, textcolor="magenta", freetype=FALSE)
+}
+
+for(i in 1:length(points2_label)){
+  label <- list(text=points2_label[i])
+  label$pos <- find_image_coordinates(long=points2$lon[i], lat=points2$lat[i], bbox=bbox, 
+                                      image_width=dim(elmat)[1], image_height=dim(elmat)[2])
+  render_label(elmat, x = label$pos$x, y = label$pos$y, z = 8500,
+               zscale = zscale, text = label$text, textsize=2, linewidth = 4, textcolor="cyan", freetype=FALSE)
+}
+
+for(i in 1:length(points3_label)){
+  label <- list(text=points3_label[i])
+  label$pos <- find_image_coordinates(long=points3$lon[i], lat=points3$lat[i], bbox=bbox, 
+                                      image_width=dim(elmat)[1], image_height=dim(elmat)[2])
+  render_label(elmat, x = label$pos$x, y = label$pos$y, z = 8500,
+               zscale = zscale, text = label$text, textsize=2, linewidth = 4, textcolor="yellow", freetype=FALSE)
+}
+
+render_snapshot(title_text = "Xiaohaituo Alpine Ski Resort in Yanqing \n2022 Beijing Winter Olympic",
+                title_size = 50, title_color = "grey90")
+```
+
+## 张家口赛区
+    在张家口的场馆群中，包括杨树滑雪场、桦林东滑雪胜地、太舞滑雪胜地、云顶滑雪度假村、万龙滑雪场。张家口的滑雪场存雪期长，雪质雪量优良，度风速适宜，非常适宜户外滑雪运动。其将承办越野滑雪、北欧两项、冬季两项、单板滑雪等比赛项目。
+    古杨树和桦林东两个滑雪场，海拔从1600米延伸到2100多米，最大落差500多米。区域内场地起伏明显、视野开阔明朗，适合开展北欧两项、越野滑雪和冬季两项比赛，并且可利用自然山形建设跳台场地，开展跳台滑雪比赛。
+    
+![张家口赛区](./data/winter_olympic/崇礼赛区.jpg)
+
+### 下载崇礼滑雪场地形数据
+    通过geovis从Mapzen上下载高分辨率的地形数据.
+```{r warning=FALSE, message=FALSE}
+# define center location
+point = list(lon=115.444786, lat=40.928771)
+
+#Get elevation data from Mapzen
+datafile <- "data/winter_olympic/chongli_dem_01.rds"
+if(!file.exists(datafile)){
+  square_km <- 4
+  max_tiles <- 50
+  dem <- mapzen_dem(point$lat, point$lon, square_km, max_tiles = max_tiles)
+  saveRDS(dem, datafile)
+}
+dem <- readRDS(datafile)
+
+# convert to matrix
+elmat = raster_to_matrix(dem)
+```
+
+### 崇礼滑雪场及其观测站点位置
+  调用leaflet来显示崇礼滑雪场的位置及气象观测站的分布位置.
+```{r warning=FALSE, message=FALSE}
+# define locations
+#bbox = list(p1 = list(long = 115.391294, lat = 40.888247),
+#            p2 = list(long = 115.501100, lat = 40.967568))
+bbox = list(p1 = list(long = xmin(dem), lat = ymin(dem)),
+            p2 = list(long = xmax(dem), lat = ymax(dem)))
+
+# 观测站点位置
+# 云顶滑雪公园
+points1 = list(lon=c(115.42, 115.4177778, 115.4102778, 115.4111111),
+               lat=c(40.95972222, 40.95916667, 40.95583333, 40.95805556))
+points1_label = c('B1620', 'B1627', 'B1629', 'B1637')
+# 越野滑雪
+points2 = list(lon=c(115.4738889, 115.4658333),
+               lat=c(40.89805556, 40.90166667))
+points2_label = c('B1649', 'B1650')
+# 冬季两项
+points3 = list(lon=c(115.4747222), lat=c(40.90972222))
+points3_label = c('B1638')
+# 跳台滑雪
+points4 = list(lon=c(115.4644444, 115.4652778),
+               lat=c(40.91, 40.90888889))
+points4_label = c('B3158', 'B3159')
+
+# show the selected region for olympic region
+icon1 <- makeAwesomeIcon(icon= 'flag', markerColor = 'red', iconColor = 'black')
+icon2 <- makeAwesomeIcon(icon= 'flag', markerColor = 'green', iconColor = 'black')
+icon3 <- makeAwesomeIcon(icon= 'home', markerColor = 'orange', iconColor = 'black')
+icon4 <- makeAwesomeIcon(icon= 'home', markerColor = 'pink', iconColor = 'black')
+leaflet(width = "100%") %>%
+  addProviderTiles(providers$Esri.WorldTopoMap) %>% 
+  addRectangles(
+    lng1 = bbox$p1$long, lat1 = bbox$p1$lat, lng2 = bbox$p2$long, lat2 = bbox$p2$lat, fillColor="transparent") %>%
+  addMarkers(
+    lng=point$lon, lat=point$lat, label="小海坨高山滑雪场") %>%
+  addAwesomeMarkers(
+    lng=points1$lon, lat=points1$lat, icon=icon1, label=points1_label) %>%
+  addAwesomeMarkers(
+    lng=points2$lon, lat=points2$lat, icon=icon2, label=points2_label) %>%
+  addAwesomeMarkers(
+    lng=points3$lon, lat=points3$lat, icon=icon3, label=points3_label) %>%
+  addAwesomeMarkers(
+    lng=points4$lon, lat=points4$lat, icon=icon4, label=points4_label) %>%
+  fitBounds(
+    lng1 = bbox$p1$long, lat1 = bbox$p1$lat, lng2 = bbox$p2$long, lat2 = bbox$p2$lat,
+  )
+```
+
+### 处理卫星影像数据
+    通过geovis自带的slippy_overlay函数无法获得超高分辨率卫星影像图像. 目前采用"BIGEMAP地图下载器"下载指定范围内的Google高清影像图, 但未经授权会导致叠加水印. 采用变通办法是直接屏幕截图, 步骤是先选定要下载范围的矩形框, 然后在屏幕上定位矩形两个对角, 然后右键撤销矩形区域, 之后用屏幕截图软件把图像截取下来, 存成png文件. 为了提高图形亮度, 采用图像软件(如snagit editor), 选择颜色调整, 调整Contract和Gamma参数即可.
+
+```{r warning=FALSE, message=FALSE}
+# Read satellite image
+overlay_file <- "data/winter_olympic/chongli_02_map.png"
+overlay_img <- png::readPNG(overlay_file)
+```
+
+### 显示三维地形数据
+
+```{r warning=FALSE, message=FALSE}
+zscale = 30
+ray_shadow <- ray_shade(elmat, sunaltitude = 20, zscale = zscale, lambert = FALSE)
+lamb_shadow <- lamb_shade(elmat, sunaltitude = 20, zscale = zscale)
+```
+
+```{r warning=FALSE, message=FALSE, fig.height=10, fig.width=14}
+rgl::clear3d()
+elmat %>%
+  sphere_shade() %>%
+  add_overlay(overlay_img, alphalayer = 0.95) %>%
+  add_shadow(ray_shadow, max_darken=0.5) %>%
+  add_shadow(lamb_shadow, max_darken=0.5) %>%
+  plot_3d(elmat, zscale = 5,windowsize = c(1400,1000), 
+          theta = -5, phi = 38, zoom = 0.52, fov = 60,
+          background = "grey40", shadowcolor = "grey10", 
+          soliddepth = 200, shadowdepth = 100)
+Sys.sleep(5)
+render_snapshot(title_text = "Chongli Alpine Ski Resort in Zhangjiakou \n2022 Beijing Winter Olympic",
+                title_size = 50, title_color = "grey90")
+```
+
+
+```{r warning=FALSE, message=FALSE, fig.height=10, fig.width=15}
+z = 13000
+
+for(i in 1:length(points1_label)){
+  label <- list(text=points1_label[i])
+  label$pos <- find_image_coordinates(long=points1$lon[i], lat=points1$lat[i], bbox=bbox, 
+                                      image_width=dim(elmat)[1], image_height=dim(elmat)[2])
+  render_label(elmat, x = label$pos$x, y = label$pos$y, z = z,
+               zscale = zscale, text = label$text, textsize=2, linewidth = 4, textcolor="magenta", freetype=FALSE)
+}
+
+for(i in 1:length(points2_label)){
+  label <- list(text=points2_label[i])
+  label$pos <- find_image_coordinates(long=points2$lon[i], lat=points2$lat[i], bbox=bbox, 
+                                      image_width=dim(elmat)[1], image_height=dim(elmat)[2])
+  render_label(elmat, x = label$pos$x, y = label$pos$y, z = z,
+               zscale = zscale, text = label$text, textsize=2, linewidth = 4, textcolor="cyan", freetype=FALSE)
+}
+
+for(i in 1:length(points3_label)){
+  label <- list(text=points3_label[i])
+  label$pos <- find_image_coordinates(long=points3$lon[i], lat=points3$lat[i], bbox=bbox, 
+                                      image_width=dim(elmat)[1], image_height=dim(elmat)[2])
+  render_label(elmat, x = label$pos$x, y = label$pos$y, z = z,
+               zscale = zscale, text = label$text, textsize=2, linewidth = 4, textcolor="yellow", freetype=FALSE)
+}
+
+for(i in 1:length(points4_label)){
+  label <- list(text=points4_label[i])
+  label$pos <- find_image_coordinates(long=points4$lon[i], lat=points4$lat[i], bbox=bbox, 
+                                      image_width=dim(elmat)[1], image_height=dim(elmat)[2])
+  render_label(elmat, x = label$pos$x, y = label$pos$y, z = z,
+               zscale = zscale, text = label$text, textsize=2, linewidth = 4, textcolor="green", freetype=FALSE)
+}
+
+render_snapshot(title_text = "Chongli Alpine Ski Resort in Zhangjiakou \n2022 Beijing Winter Olympic",
+                title_size = 50, title_color = "grey90")
+```
+
+

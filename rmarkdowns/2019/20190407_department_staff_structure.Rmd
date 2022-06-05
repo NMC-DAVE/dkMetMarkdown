@@ -1,0 +1,87 @@
+---
+title: "天气预报技术研发室人员结构分析"
+output: html_notebook
+---
+
+# Load library
+
+```{r}
+library(ggplot2)
+library(hrbrthemes)
+```
+
+
+# 年龄结构分析
+
+```{r, warning=FALSE, message=FALSE}
+# staff age
+df_age <- data.frame(
+  Range=c('26-30','31-35','36-40','41-45','46-50','51-55','56-60'),
+  Number=c(2, 3, 6, 3, 3, 3, 0))
+
+# 
+g <- ggplot(df_age, aes(Range, Number))+
+  theme_ipsum() +
+  geom_col(fill="#CEA438") +
+  geom_text(aes(label = Number), vjust = -0.3)  +
+  labs(title="年龄结构")+
+  ylim(0, 7)
+
+g
+```
+
+# 学历结构
+
+```{r, warning=FALSE, message=FALSE}
+# staff education
+df_education <- data.frame(
+  Grade=c('a)本科','b)硕士','c)在读博士','d)博士'),
+  Number=c(0, 7, 2, 11))
+
+# 
+g <- ggplot(df_education, aes(Grade, Number))+
+  geom_col(fill="#D0C7AF") +
+  geom_text(aes(label = Number), vjust = -0.5)  +
+  theme_ipsum() +
+  labs(title="学历结构")+
+  ylim(0, 12)
+
+g
+```
+
+# 职称结构
+
+```{r, warning=FALSE, message=FALSE}
+# staff education
+df_title <- data.frame(
+  JobTitle=c('a)助理工程师', 'b)工程师','c)高级工程师','d)正研级工程师'),
+  Number=c(0, 2, 15, 3))
+
+# 
+g <- ggplot(df_title, aes(JobTitle, Number))+
+  geom_col(fill="#616F75") +
+  geom_text(aes(label = Number), vjust = -0.5)  +
+  theme_ipsum() +
+  labs(title="职称结构")+
+  ylim(0, 16)
+
+g
+```
+# 政治面貌
+
+```{r, warning=FALSE, message=FALSE}
+# staff education
+df_title <- data.frame(
+  JobTitle=c('a)群众', 'b)中共党员','c)预备党员', 'd)九三学社'),
+  Number=c(3, 15, 1, 1))
+
+# 
+g <- ggplot(df_title, aes(JobTitle, Number))+
+  geom_col(fill="#ff6800") +
+  geom_text(aes(label = Number), vjust = -0.5)  +
+  theme_ipsum() +
+  labs(title="政治面貌")+
+  ylim(0, 16)
+
+g
+```

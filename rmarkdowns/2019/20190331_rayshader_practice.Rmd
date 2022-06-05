@@ -1,0 +1,93 @@
+---
+title: "Rayshader base tutorial and bonus"
+output: html_notebook
+---
+
+  [Rayshader](https://github.com/tylermorganwall/rayshader)可以生成美观的三维地形图.David Solito写的一篇博文[A Rayshader base tutorial + Bonus : Hawaii](https://www.davidsolito.com/post/a-rayshader-base-tutortial-bonus-hawaii/)具有很好的参考意义，用于生成实际的三维地形也简单明了.
+  
+  ![](images/rayshader_hawai.jpg)
+  
+### Load library
+
+```{r, warning=FALSE, message=FALSE}
+library(rayshader)
+library(raster)
+library(png)
+library(rgl)
+knitr::knit_hooks$set(webgl = hook_webgl)
+```
+
+### 下载地形数据
+
+Opentopography网站提供了地形数据[下载界面](http://opentopo.sdsc.edu/datasets)。浏览地图至需要下载地形数据的区域，采用"Select a region"工具选取地图范围。之后选择地形数据库，一般使用GMRT数据。选择数据输出格式为GeoTiff，分辨率为最大Max，另外要选择"Generate additional color-relief and colored hillshades"，生成png图片用于三维地形表面的纹理。
+
+![](images/opentopography_output1.png)
+
+### 三维地形可视化
+
+Read and preprocess data.
+```{r}
+# read raster file
+elevation <- "data/output_gmrt.tif"
+elevation.raster <- raster::raster(elevation)
+
+# extract and convert to matrix
+elevation.matrix <- matrix(extract(elevation.raster, 
+                                   extent(elevation.raster), buffer = 100), 
+                           nrow=ncol(elevation.raster), ncol=nrow(elevation.raster))
+
+# set zscale
+my.z <- 30
+
+# get texture
+elevation.texture.map <- readPNG("data/viz.gmrt.crhs.white.png")
+```
+
+Test map.
+```{r}
+elevation.matrix  %>% 
+  sphere_shade(sunangle = 35, texture = "imhof1", zscale = my.z) %>%
+  plot_map()
+```
+
+Add texture.
+```{r}
+elevation.amb.shade <- ambient_shade(elevation.matrix, zscale = my.z)
+elevation.ray.shade <- ray_shade(elevation.matrix,  sunangle = 35, zscale = my.z)
+elevation.matrix  %>% 
+  sphere_shade(sunangle = 35, texture = "desert", zscale = my.z) %>%
+  add_overlay(elevation.texture.map, alphacolor = NULL, alphalayer = 0.9) %>% 
+  plot_map()
+```
+
+Show 3D.
+```{r}
+elevation.matrix  %>% 
+  sphere_shade(sunangle = 35, texture = "desert", zscale = my.z) %>%
+  add_overlay(elevation.texture.map, alphacolor = NULL, alphalayer = 0.9) %>% 
+  add_shadow(elevation.amb.shade) %>% 
+  add_shadow(elevation.ray.shade, 0.7) %>%
+  plot_3d(heightmap = elevation.matrix, 
+          zscale = my.z, 
+          fov = 90,
+          lineantialias = TRUE,
+          theta = 45,
+          phi = 15,
+          zoom = 0.7)
+
+render_water(elevation.matrix, zscale = my.z, wateralpha = 0.3, waterlinecolor = "white", watercolor = "turquoise4")
+render_camera(theta = 135, phi = 25, zoom = 0.8, fov = 75)
+render_snapshot()
+#rgl::rgl.clear()
+#rglwidget()
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rgl::setupKnitr()
+```
+
+```{r rgl=TRUE, dev='png'}
+rgl::plot3d(runif(10), runif(10), runif(10))
+render_snapshot()
+```

@@ -1,0 +1,49 @@
+---
+title: "2020年2月5-6日北京降雪实况分析"
+output: html_notebook
+---
+
+```{r warning=FALSE, message=FALSE}
+library(tidyverse)
+library(readxl)
+library(DT)
+library(hrbrthemes)
+library(ggrepel)
+library(showtext)
+library(nmcMetIO)
+
+font_add("simhei", "simhei.ttf")
+font_add("simkai", "simkai.ttf")
+font_add('simsun', 'simsun.ttc')
+```
+
+
+```{r}
+dataCode <- "SURF_CHN_MUL_HOR"
+obsData = cimiss_obs_by_time_range_and_staIds("[20200205000000,20200206120000]", 
+                                              dataCode = "SURF_CHN_MUL_HOR",
+                                              elements = "Station_Name,Station_Id_C,Lat,Lon,Alti,Datetime,PRE_1h",
+                                              staIds = "54399,54511")
+obsData <- obsData %>% mutate(Name=paste0(Station_Name,"(",Station_Id_C,")"))
+```
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=9, fig.asp=0.5}
+showtext_auto()
+ggplot(data=obsData, aes(x=Datetime))+
+  geom_col(aes(y=PRE_1h, fill=Name), show.legend = FALSE) + 
+  geom_text(aes(y=PRE_1h, label=ifelse(obsData$PRE_1h > quantile(obsData$PRE_1h, 0.9),as.character(obsData$PRE_1h),'')), 
+            vjust = -0.5) +
+  scale_x_datetime(date_labels = "%dT%H", date_breaks = "6 hours", date_minor_breaks="1 hours", expand=c(0,0)) +
+  scale_y_continuous(limits=c(0, max(0.5, obsData$PRE_1h)), expand=c(0, 0)) + 
+  facet_grid(rows = vars(Name)) + 
+  labs(y="降水量 ", x="",
+       title="地面气象站逐小时降水观测 ",
+       subtitle=paste0(strftime(min(obsData$Datetime), "%Y-%m-%dT%H:%M", tz="GMT"), ' 至 ',
+                       strftime(max(obsData$Datetime), "%Y-%m-%dT%H:%M", tz="GMT"), ' 时(UTC)逐1小时累积降水量观测 '),
+       caption="Data source from the CIMISS of National Meteorological Information Center. \n Producted by National Meteorological Center of CMA.") +
+  theme_ipsum(base_family='simhei', 
+              base_size=16, axis_title_size=16,
+              plot_title_size=22, subtitle_size=14, strip_text_size=16,
+              caption_family='Arial Narrow', caption_margin=0) +
+  theme(panel.spacing = unit(0.8, "lines"))
+```

@@ -1,0 +1,68 @@
+---
+title: "绘制条纹图"
+output: html_notebook
+---
+
+Refer to <https://dominicroye.github.io/en/2018/how-to-create-warming-stripes-in-r/>
+
+2018年, 气候变暖条纹图变得流行起来, 本文档利用ggplot来复现变暖条纹图.
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(lubridate)
+library(RColorBrewer)
+
+#import the annual temperatures
+temp_lisboa <- read_csv("./data/temp_lisboa.csv")
+
+str(temp_lisboa)
+```
+
+```{r message=FALSE, warning=FALSE}
+
+# select only the annual temperature and year column
+temp_lisboa_yr <- select(temp_lisboa, YEAR, metANN)
+
+# rename the temperature column
+temp_lisboa_yr <- rename(temp_lisboa_yr, ta=metANN)
+
+# deal missing values 999.9
+temp_lisboa_yr <- mutate(temp_lisboa_yr, ta = ifelse(ta==999.9, NA, ta))
+
+temp_lisboa_yr
+```
+
+`temp_lisboa_yr`中`YEAR`转化为日期对象, 则在后面处理中更加容易.
+
+```{r}
+temp_lisboa_yr <- mutate(temp_lisboa_yr, date=str_c(YEAR, "01-01", sep="-") %>% ymd())
+
+temp_lisboa_yr
+```
+
+```{r fig.width=12, fig.height=3}
+# 定义绘图style
+theme_strip <- theme_minimal()+
+                 theme(axis.text.y = element_blank(),
+                       axis.line.y = element_blank(),
+                       axis.title = element_blank(),
+                       panel.grid.major = element_blank(),
+                       legend.title = element_blank(),
+                       axis.text.x = element_text(vjust = 3),
+                       panel.grid.minor = element_blank(),
+                        plot.title = element_text(size = 14, face = "bold")
+                       )
+
+
+col_strip <- brewer.pal(11, "RdBu")
+
+ggplot(temp_lisboa_yr,aes(x = date, y = 1, fill = ta))+
+       geom_tile()+
+       scale_x_date(date_breaks = "6 years", date_labels = "%Y", expand = c(0, 0))+
+       scale_y_continuous(expand = c(0, 0))+
+       scale_fill_gradientn(colors = rev(col_strip))+
+       guides(fill = guide_colorbar(barwidth = 1))+
+       labs(title = "LISBOA 1880-2018",
+            caption = "Datos: GISS Surface Temperature Analysis")+
+       theme_strip
+```

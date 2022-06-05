@@ -1,0 +1,307 @@
+---
+title: "拟合GEV函数"
+output: html_notebook
+---
+
+
+
+```{r message=FALSE, warning=FALSE}
+# 载入必要的软件包
+library(extRemes)
+library(ggplot2)
+
+library(xts)
+library(RCurl)
+```
+
+# 读入数据
+```{r message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
+
+# 读入用于对比的两个模式数据
+file1 = "./data/huting/pr_Amon_picontrol_2-5d_regM_jpp_EC_MME_1951-2021_base-all_month07_1963_nwindow-21y.txt"
+data1 = read.table(file=file1, header=F, col.names='V1')
+file2 = "./data/huting/pr_Amon_hist-aer_2-5d_regM_jpp_EC_MME_1951-2020_base-all_month07_1963_nwindow-21y.txt"
+data2 = read.table(file=file2, header=F, col.names='V1')
+
+# 设置x轴的数据, 用于进行频率分布分析和GEV模型拟合数据生成
+xd = seq(-100, 150, 5)
+
+# 第一个模式的GEV模型数据拟合
+# 1. 拟合GEV模型
+fit = fevd(data1$V1,type="GEV")
+# 2. 生成模型的概率密度函数数据, 这里使用fit中的location, scale, shape参数, 输入devd密度函数中即可
+yd <- devd(xd, loc = fit$results$par[['location']], scale =fit$results$par[['scale']],   
+           shape = fit$results$par[['shape']], type=fit$type)
+# 3. 构建一个data.frame以便ggplot2制图
+fit.data1 <- data.frame(xd=xd, yd=yd)
+
+# 第二个模式的GEV模型数据拟合
+fit = fevd(data2$V1,type="GEV")
+yd <- devd(xd, loc = fit$results$par[['location']], scale =fit$results$par[['scale']], 
+           shape = fit$results$par[['shape']], type=fit$type)
+fit.data2 <- data.frame(xd=xd, yd=yd)
+
+# 绘制图像, geom_histogram生成频率分布直方图, geom_line生成概率密度分布曲线
+p <- ggplot()+
+  geom_histogram(data=data1, aes(x=V1, y=..density..), 
+                breaks=xd, alpha=0.4, 
+                position="identity", lwd=0.2, fill="red") +
+  geom_histogram(data=data2, aes(x=V1, y=..density..), 
+                breaks=xd, alpha=0.4, 
+                position="identity", lwd=0.2, fill="blue") +
+  geom_line(data=fit.data1, aes(x=xd, y=yd), col="red", size=2)+
+  geom_line(data=fit.data2, aes(x=xd, y=yd), col="blue", size=2)+
+  labs(x="", y="Density")+
+  theme_bw(base_size=20)
+
+print(p)
+
+# 保持图像文件
+# ggsave("test.png", width=6, height=5)
+```
+
+```{r message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
+file1 = "./data/huting/pr_Amon_picontrol_2-5d_regM_jpp_EC_MME_1951-2021_base-all_month5-9_2021_nwindow-21y.txt"
+data1 = read.table(file=file1, header=F, col.names='V1')
+file2 = "./data/huting/pr_Amon_hist-aer_2-5d_regM_jpp_EC_MME_1951-2020_base-all_month5-9_2021_nwindow-21y.txt"
+data2 = read.table(file=file2, header=F, col.names='V1')
+
+# 设置x轴的数据, 用于进行频率分布分析和GEV模型拟合数据生成
+xd = seq(-100, 150, 5)
+
+# 第一个模式的GEV模型数据拟合
+# 1. 拟合GEV模型
+fit = fevd(data1$V1,type="GEV", method="Lmoments")
+# 2. 生成模型的概率密度函数数据, 这里使用fit中的location, scale, shape参数, 输入devd密度函数中即可
+yd <- devd(xd, loc = fit$results[['location']], scale =fit$results[['scale']],   
+           shape = fit$results[['shape']], type=fit$type)
+# 3. 构建一个data.frame以便ggplot2制图
+fit.data1 <- data.frame(xd=xd, yd=yd)
+
+# 第二个模式的GEV模型数据拟合
+fit = fevd(data2$V1,type="GEV", method="Lmoments")
+yd <- devd(xd, loc = fit$results[['location']], scale =fit$results[['scale']], 
+           shape = fit$results[['shape']], type=fit$type)
+fit.data2 <- data.frame(xd=xd, yd=yd)
+
+# 绘制图像, geom_histogram生成频率分布直方图, geom_line生成概率密度分布曲线
+p <- ggplot()+
+  geom_histogram(data=data1, aes(x=V1, y=..density..), 
+                breaks=xd, alpha=0.4, 
+                position="identity", lwd=0.2, fill="red") +
+  geom_histogram(data=data2, aes(x=V1, y=..density..), 
+                breaks=xd, alpha=0.4, 
+                position="identity", lwd=0.2, fill="blue") +
+  geom_line(data=fit.data1, aes(x=xd, y=yd), col="red", size=2)+
+  geom_line(data=fit.data2, aes(x=xd, y=yd), col="blue", size=2)+
+  labs(x="", y="Density")+
+  theme_bw(base_size=20)
+
+print(p)
+```
+
+## 极值分析理论的学习
+https://www.gis-blog.com/category/extreme-value-analysis/
+
+```{r message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
+
+read_ehyd <- function(ehyd_url) {
+  # separate the header, open the connection with correct encoding
+  con <- url(ehyd_url, encoding = "latin1")
+  header <- readLines(con, n=50)
+  lines.header <- grep("Werte:", header, fixed = T)
+  # read data, define time and values
+  infile <- read.csv2(con, header = F, skip = lines.header,
+                      col.names = c("time", "value"),
+                      colClasses = c("character", "numeric"),
+                      na.strings = "Lücke",
+                      strip.white = TRUE, as.is = TRUE, fileEncoding = "latin1")
+  infile$time <- as.POSIXct(infile$time, format = "%d.%m.%Y %H:%M:%S")
+  # output message
+  station <- gsub("(^.*;)([a-zA-Z]+)", "\\2", header[1])
+  line_param <- grep("Exportzeitreihe:", header, fixed = T)
+  if(endsWith(ehyd_url, "2")){
+    param <- gsub("(^.*;)([a-zA-Z]+)(,.+$)", "\\2", header[line_param])
+  } else {
+    param <- gsub("Exportzeitreihe:           ;", "", header[line_param])
+    param <- strsplit(param, split = ",")[[1]][[2]]
+  }
+  message("data set: ", param, " in ", station)
+  # return time series object of class xts
+  return(xts(infile$value, order.by = infile$time))
+}
+
+# get data from eHYD
+# precipitation_xts 是从197年1月1日到2019年1月1日的逐日降水数据.
+ehyd_url <- "http://ehyd.gv.at/eHYD/MessstellenExtraData/nlv?id=107540&file=2"
+precipitation_xts <- read_ehyd(ehyd_url)
+
+```
+
+## Block Maxima Approach
+
+```{r message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
+
+# derive AMS for maximum precipitation
+ams <- apply.yearly(precipitation_xts, max)
+ams <- na.omit(ams)
+
+# maximum-likelihood fitting of the GEV distribution
+fit_mle <- fevd(as.vector(ams), method = "MLE", type="GEV")
+# diagnostic plots
+plot(fit_mle)
+
+# return levels:
+rl_mle <- return.level(fit_mle, conf = 0.05, return.period= c(2,5,10,20,50,100))
+print(rl_mle)
+```
+
+```{r message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
+
+# fitting of GEV distribution based on L-moments estimation
+fit_lmom <- fevd(as.vector(ams), method = "Lmoments", type="GEV")
+# diagnostic plots
+plot(fit_lmom)
+# return levels:
+rl_lmom <- return.level(fit_lmom, conf = 0.05, return.period= c(2,5,10,20,50,100))
+print(rl_lmom)
+```
+
+
+```{r}
+# return level plots
+par(mfcol=c(1,2))
+# return level plot w/ MLE
+plot(fit_mle, type="rl",
+     main="Return Level Plot for Bärnkopf w/ MLE",
+     ylim=c(0,200), pch=16)
+loc <- as.numeric(return.level(fit_mle, conf = 0.05,return.period=100))
+segments(100, 0, 100, loc, col= 'midnightblue',lty=6)
+segments(0.01,loc,100, loc, col='midnightblue', lty=6)
+
+# return level plot w/ LMOM
+plot(fit_lmom, type="rl",
+     main="Return Level Plot for Bärnkopf w/ L-Moments",
+     ylim=c(0,200))
+loc <- as.numeric(return.level(fit_lmom, conf = 0.05,return.period=100))
+segments(100, 0, 100, loc, col= 'midnightblue',lty=6)
+segments(0.01,loc,100, loc, col='midnightblue', lty=6)
+```
+
+```{r}
+# comparison of return levels
+results <- t(data.frame(mle=as.numeric(rl_mle),
+                        lmom=as.numeric(rl_lmom)))
+colnames(results) <- c(2,5,10,20,50,100)
+round(results,1)
+```
+
+
+## Peak over Threshold Approach
+
+```{r message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
+
+precipitation_xts = na.omit(precipitation_xts)
+
+# mean residual life plot:
+mrlplot(precipitation_xts, main="Mean Residual Life Plot")
+# The mean residual life plot depicts the Thresholds (u) vs Mean Excess flow.
+# The idea is to ﬁnd the lowest threshold where the plot is nearly linear;
+# taking into account the 95% conﬁdence bounds.
+```
+
+```{r}
+# fitting the GPD model over a range of thresholds
+threshrange.plot(precipitation_xts, r = c(30, 45), nint = 16)
+# ismev implementation is faster:
+# ismev::gpd.fitrange(precipitation_xts, umin=30, umax=45, nint = 16)
+# set threshold
+th <- 40
+```
+
+
+```{r}
+# maximum likelihood estimation
+pot_mle <- fevd(as.vector(precipitation_xts), method = "MLE", type="GP", threshold=th)
+# diagnostic plots
+plot(pot_mle)
+rl_mle <- return.level(pot_mle, conf = 0.05, return.period= c(2,5,10,20,50,100))
+print(rl_mle)
+```
+```{r}
+# L-moments estimation
+pot_lmom <- fevd(as.vector(precipitation_xts), method = "Lmoments", type="GP", threshold=th)
+# diagnostic plots
+plot(pot_lmom)
+rl_lmom <- return.level(pot_lmom, conf = 0.05, return.period= c(2,5,10,20,50,100))
+print(rl_lmom)
+```
+
+```{r}
+# return level plots
+par(mfcol=c(1,2))
+# return level plot w/ MLE
+plot(pot_mle, type="rl",
+     main="Return Level Plot for Oberwang w/ MLE",
+     ylim=c(0,200), pch=16)
+loc <- as.numeric(return.level(pot_mle, conf = 0.05,return.period=100))
+segments(100, 0, 100, loc, col= 'midnightblue',lty=6)
+segments(0.01,loc,100, loc, col='midnightblue', lty=6)
+
+# return level plot w/ LMOM
+plot(pot_lmom, type="rl",
+     main="Return Level Plot for Oberwang w/ L-Moments",
+     ylim=c(0,200))
+loc <- as.numeric(return.level(pot_lmom, conf = 0.05,return.period=100))
+segments(100, 0, 100, loc, col= 'midnightblue',lty=6)
+segments(0.01,loc,100, loc, col='midnightblue', lty=6)
+
+```
+
+```{r}
+# comparison of return levels
+results <- t(data.frame(mle=as.numeric(rl_mle),
+                        lmom=as.numeric(rl_lmom)))
+colnames(results) <- c(2,5,10,20,50,100)
+round(results,1)
+```
+
+## Dealing with trends
+
+```{r}
+# derive AMS for maximum precipitation
+ams <- apply.yearly(precipitation_xts, max)
+
+# check stationarity within AMS:
+# Mann-Kendall trend test
+Kendall::MannKendall(ams)
+
+# simple linear model
+ams_df <- fortify(ams)
+colnames(ams_df)[1] <- "date"
+summary(lm(ams~date, data=ams_df))
+
+p <- ggplot(ams_df, aes(x = date, y = ams)) + geom_point() + geom_line()
+p + stat_smooth(method = "lm", formula = y ~ x, size = 1)
+```
+```{r}
+# maximum likelihood estimation
+mle_trend <- fevd(x = ams, data = ams_df, location.fun=~date, method = "MLE", type="GEV")
+rl_trend <- return.level(mle_trend, conf = 0.05, return.period= c(2,5,10,20,50,100))
+
+# return level plot
+plot(mle_trend, type="rl", main="Return Level Plot for Bärnkopf w/ MLE")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

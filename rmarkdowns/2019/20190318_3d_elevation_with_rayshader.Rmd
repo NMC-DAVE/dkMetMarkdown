@@ -1,0 +1,47 @@
+---
+title: "3D elevation analysis with Rayshader"
+output: html_notebook
+---
+
+```{r, warning=FALSE, message=FALSE}
+library(ceramic)
+library(rayshader)
+library(raster)
+library(magrittr)
+library(rgl)
+knitr::knit_hooks$set(webgl = hook_webgl)
+```
+
+ 使用[ceramic](https://github.com/hypertidy/ceramic)从MAPBOX上下载地形数据.
+
+```{r, warning=FALSE, message=FALSE}
+# set map box api key
+Sys.setenv(MAPBOX_API_KEY = "pk.eyJ1IjoiZGF2ZTIwMDQiLCJhIjoiY2szNzM2NnZ2MDdrcDNic2I0Z3A1ODRsayJ9.mKBGJWm15vzF2-IYBpR3HQ")
+
+# retrieve DEM data
+loc <- cbind(116.4074, 39.9042)
+dem <- cc_elevation(loc, buffer=50000)
+zap0 <- function(x) x[x > 0]
+plot(dem, col = grey(seq(0.2, 1, length.out =  7)))
+```
+
+```{r, warning=FALSE, message=FALSE}
+elmat <- matrix(extract(dem, extent(dem)), nrow=ncol(dem),ncol=nrow(dem))
+#open3d(useNULL=TRUE)
+elmat %>%
+    sphere_shade(texture="imhof1") %>%
+    plot_3d(elmat,zscale=10)
+#render_snapshot()
+#rgl::rgl.clear()
+#rgl::rgl.close()
+widget <- rgl::rglwidget()
+```
+
+```{r, warning=FALSE, message=FALSE}
+x <- sort(rnorm(1000))
+y <- rnorm(1000)
+z <- rnorm(1000) + atan2(x, y)
+open3d(useNULL=TRUE)
+plot3d(x, y, z, col = rainbow(1000))
+rgl::rglwidget()
+```

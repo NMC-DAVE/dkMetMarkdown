@@ -1,0 +1,90 @@
+---
+title: "城镇预报温度评分分析"
+author: "[Kan Dai](https://github.com/nmcdev)"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_section: true
+    self_contained: yes
+    css: !expr system.file("rmarkdown","templates","nmc_notebook_template",
+           "resources","corp-styles.css",package="nmcMetResources")
+    highlight: pygments
+    includes:
+      after_body: !expr system.file("rmarkdown","templates","nmc_notebook_template",
+                    "resources","footprint.html",package="nmcMetResources")
+    code_folding: show
+---
+
+<img src="https://raw.githubusercontent.com/nmcdev/nmcMetResources/master/inst/extdata/nmc_large.png" style="position:absolute;top:10px;right:100px;" width="100" height="100"/>
+
+<hr style="height:8px;">
+
+> 国家气象中心天气预报技术研发室
+
+# Overview
+
+分析国家气象中心逐年城镇预报最高最低温度评分的变化趋势, 评分数据由韦青提供。
+
+# Environmental Setup
+
+```{r warning=FALSE, message=FALSE}
+# loading libraries
+library(tidyverse)
+library(readxl)
+library(DT)
+library(hrbrthemes)
+library(ggrepel)
+library(showtext)
+
+# load font
+showtext_auto(enable = TRUE)
+font_add("simhei", "simhei.ttf")
+font_add("simkai", "simkai.ttf")
+font_add('simsun', 'simsun.ttc')
+```
+
+# Retrieve Data
+
+读入2005年以来逐年城镇预报最高最低温度评分数据.
+
+```{r warning=FALSE, message=FALSE}
+scores <- read_excel("./data/Scores/历年城镇报高低温预报准确率.xlsx")
+datatable(scores, rownames=FALSE, options=list(pageLength=15, scrollX=T))
+```
+
+# Prepare Data
+
+```{r}
+# reshape the data
+scores <- scores %>% gather("Type", "Scores", 2:3)
+```
+
+# Explore and Visualization
+
+城镇预报最高、最低温度的预报准确率逐年变化曲线
+
+```{r warning=FALSE, message=FALSE, fig.width=12, fig.height=12, fig.asp=0.6, fig.showtext=TRUE, fig.retina=1}
+ggplot(data=scores, aes(x=Year))+
+  geom_line(aes(y=Scores, colour=Type), size=2) + 
+  geom_point(aes(y=Scores, colour=Type), size=6) +
+  geom_text_repel(aes(y=Scores, label=sprintf("%.0f%%", Scores)), 
+                  min.segment.length=0, nudge_y=1, nudge_x=-0.3, family='simhei', size=5)+
+  scale_colour_manual(name = NULL,values = c("Tem_Max" = "#ae4544", "Tem_Min"="#436f82"), labels=c("最高气温 ", "最低气温 ")) +
+  scale_x_continuous(breaks=scores$Year, expand=c(0.1,0.1)) + 
+  guides(colour = guide_legend(nrow = 1)) +
+  ylim(55, 86) +
+  labs(y="", x="",
+       title="国家气象中心城镇预报质量逐年变化曲线 ",
+       subtitle="2005-2019年全国范围24小时时效最高最低气温预报的准确率(%) ",
+       caption="采用全国2400个站点日最高和最低温观测作为真值. \n 准确率定义为预报与实况绝对差值2度以内的站数比例. ") +
+  theme_ipsum(grid="Y", base_family='simhei', 
+              base_size=16, axis_title_size=16,
+              plot_title_size=22, subtitle_size=14,
+              caption_family='simsun', caption_margin=0) +
+  theme(legend.position = "top")
+
+ggsave(filename="./images/qpf_temp_maxmin_correct_TS.png", dpi=100, type="cairo")
+```

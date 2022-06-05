@@ -1,0 +1,132 @@
+---
+title: "2019-nCoV Exploration"
+author: "Kan Dai"
+date: "Feb 2, 2020"
+output: 
+  html_notebook:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_section: true
+    self_contained: yes
+    css: ./style/corp-styles.css
+    highlight: pygments
+    code_folding: show
+---
+
+<img src="./style/nmc_large.png" style="position:absolute;top:10px;right:100px;" width="100" height="100"/>
+
+<hr style="height:8px;">
+
+# Overview
+
+采用R语言分析当前2019-nCoV疫情分布和演变.
+
+-   Setup
+
+```{r warning=FALSE, message=FALSE}
+library(tidyverse)
+library(httr)
+library(jsonlite)
+library(lubridate)
+library(knitr)
+library(kableExtra)
+library(sf)
+library(ggspatial)
+library(hrbrthemes)
+```
+
+# Data Preparation
+
+参照[Python实战：抓肺炎疫情实时数据](https://blog.csdn.net/xufive/article/details/104093197)这篇文章, 从腾讯的(疫情实时追踪)[<https://news.qq.com/zt2020/page/feiyan.htm?from=timeline&isappinstalled=0>]上抓取数据.
+
+```{r warning=FALSE, message=FALSE}
+# Grab the data from tencent website
+time = Sys.time()
+url = paste0('https://view.inews.qq.com/g2/getOnsInfo?name=disease_h5&callback=&_=', as.character(as.integer(time)*1000))
+txt <- fromJSON(txt=url)
+data <- fromJSON(txt=txt$data)
+
+# Get the total and today data
+area_total <- data.frame(data$areaTree$children[[1]]$name, data$areaTree$children[[1]]$total)
+names(area_total) <- c("NAME", "Confirm", "Suspect", "Dead", "Heal")
+area_today <- data.frame(data$areaTree$children[[1]]$name, data$areaTree$children[[1]]$today)
+names(area_today) <- c("NAME", "Confirm", "Suspect", "Dead", "Heal")
+
+kable(area_total, "html") %>%
+  kable_styling(position = "left") %>%
+  scroll_box(width = "100%")
+```
+
+# Map Visualization
+
+读取地图数据, 将省名称处理为短名称，并进行范围剪裁和进行地图坐标转换(可参考(如何处理地图投影转换)[<http://www.sohu.com/a/334504058_718302>]和(ZOOMING IN ON MAPS WITH SF AND GGPLOT2)[<https://datascience.blog.wzb.eu/2019/04/30/zooming-in-on-maps-with-sf-and-ggplot2/>]).
+
+```{r warning=FALSE, message=FALSE}
+# Get China map data
+china_map <- st_read(system.file("extdata/bou2_4p.shp",package="nmcMetResources"), stringsAsFactors=FALSE, quiet=TRUE)
+Encoding(china_map$NAME)<-"GBK"
+china_map$NAME <- substr(china_map$NAME,0,2)
+china_map$NAME <- gsub('内蒙', '内蒙古', china_map$NAME)
+china_map$NAME <- gsub('黑龙', '黑龙江', china_map$NAME)
+china_map <- st_crop(china_map, xmin=73, xmax=135, ymin=17, ymax=54)
+china_map <- st_set_crs(china_map,4326)
+china_map <- st_transform(china_map, "+init=epsg:4508")
+```
+
+将地理信息与数据合并起来.
+
+```{r warning=FALSE, message=FALSE}
+area_total_data <- left_join(china_map, area_total, by="NAME")
+area_total_data$Confirm <- cut(area_total_data$Confirm, 
+                               c(0, 10, 100, 500, 1000, 5000, 10000), 
+                               labels=c("1-10", "11-100", "101-500", "501-1000", "1001-5000", "5001-10000"))
+area_today_data <- left_join(china_map, area_today, by="NAME")
+area_today_data$Confirm <- cut(area_today_data$Confirm, 
+                               c(0, 10, 50, 100, 500, 1000, 3000), 
+                               labels=c("1-10", "11-50", "51-100", "101-500", "501-1000", "1001-3000"))
+```
+
+确诊总人数分布地图.
+
+```{r warning=FALSE, message=FALSE, fig.width=10, fig.height=8}
+ggplot() +
+  geom_sf(data=area_total_data, aes(fill=Confirm)) +
+  scale_fill_manual(name=NULL, values=c(
+    "1-10"="#d8cb98", "11-100"="#a4ad6f", "101-500"="#cc7c3a", "501-1000"="#436f82",
+    "1001-5000"="#7c5981", "5001-10000"="#ae4544", "NA"="#cccccc"), breaks=levels(area_total_data$Confirm)) + 
+  guides(fill = guide_legend(nrow = 1)) + 
+  coord_sf(expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "The Number of 2019-nCoV Confirmed People",
+       subtitle = paste0("The Confirmed Infected People untile ", strftime(time), ' in China'),
+       caption = "Originals <https://news.qq.com/zt2020/page/feiyan.htm> \n by Kan Dai, kan.dai@163.com") +
+  theme_ipsum_rc(grid=TRUE) +
+  theme(legend.position = "top")
+```
+
+新增确诊人数分布地图.
+
+```{r warning=FALSE, message=FALSE, fig.width=10, fig.height=8}
+ggplot() +
+  geom_sf(data=area_today_data, aes(fill=Confirm)) +
+  scale_fill_manual(name=NULL, values=c(
+    "1-10"="#d8cb98", "11-50"="#a4ad6f", "51-100"="#cc7c3a", "101-500"="#436f82",
+    "501-1000"="#7c5981", "1001-3000"="#ae4544", "NA"="#cccccc"), breaks=levels(area_today_data$Confirm)) + 
+  guides(fill = guide_legend(nrow = 1)) + 
+  coord_sf(expand = FALSE) + 
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "The Number of 2019-nCoV Confirmed People",
+       subtitle = paste0("The Confirmed Infected People in ", strftime(time, format="%Y-%m-%d"), ' in China'),
+       caption = "Originals <https://news.qq.com/zt2020/page/feiyan.htm> \n by Kan Dai, kan.dai@163.com") +
+  theme_ipsum_rc(grid=TRUE) +
+  theme(legend.position = "top")
+```

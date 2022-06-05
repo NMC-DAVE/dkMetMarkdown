@@ -1,0 +1,48 @@
+---
+title: "ggplot可视化绘图"
+output: html_notebook
+---
+
+ggplot2有很多优秀的拓展程序库, 用于不同类型的数据可视化. 下面展示一个一些个例.
+
+## 小鸡图形
+
+[ggchicklet](https://cinc.rud.is/web/packages/ggchicklet/), 具体可以参考https://rud.is/b/2019/06/30/make-refreshing-segmented-column-charts-with-ggchicklet/
+
+```{r fig.width=12, fig.height=10}
+library(ggchicklet)
+library(hrbrthemes)
+library(tidyverse)
+
+# 载入数据, 该数据记录各个发言人在某个议题上的谈论时间长度
+data("debates2019")
+
+# 预处理数据, 选择第1讨论组, 然后对讨论人按照讨论时间进行排序, 再对议题加上factor levels
+data <- debates2019 %>% filter(debate_group == 1) %>% 
+  mutate(speaker = fct_reorder(speaker, elapsed, sum, .desc=FALSE)) %>%
+  mutate(topic = fct_other(topic,c(
+    "Immigration", "Economy", "Climate Change", 
+    "Gun Control", "Healthcare", "Foreign Policy")))
+
+# 绘制图像
+data %>%
+  ggplot(aes(speaker, elapsed, group = timestamp, fill = topic)) +
+  geom_chicklet(width = 0.75) +
+  scale_y_continuous(expand = c(0, 0.0625), position = "right",
+    breaks = seq(0, 14, 2), labels = c(0, sprintf("%d min.", seq(2, 14, 2)))
+  ) +
+  scale_fill_manual(name = NULL,values = c(
+    "Immigration" = "#ae4544", "Economy" = "#d8cb98", "Climate Change" = "#a4ad6f",
+    "Gun Control" = "#cc7c3a", "Healthcare" = "#436f82", "Foreign Policy" = "#7c5981",
+    "Other" = "#cccccc"), breaks = setdiff(unique(debates2019$topic), "Other")) +
+  guides(fill = guide_legend(nrow = 1)) +
+  coord_flip() +
+  labs(x = NULL, y = NULL, fill = NULL,
+    title = "How Long Each Candidate Spoke",
+    subtitle = "Nights 1 & 2 of the June 2019 Democratic Debates",
+    caption = "Each bar segment represents the length of a candidate’s response to a question.\n\nOriginals <https://www.nytimes.com/interactive/2019/admin/100000006581096.embedded.html?>\n<https://www.nytimes.com/interactive/2019/admin/100000006584572.embedded.html?>\nby @nytimes Weiyi Cai, Jason Kao, Jasmine C. Lee, Alicia Parlapiano and Jugal K. Patel\n\n#rstats reproduction by @hrbrmstr"
+  ) +
+  theme_ipsum_rc(grid="X") +
+  theme(axis.text.x = element_text(color = "gray60", size = 10)) +
+  theme(legend.position = "top")
+```

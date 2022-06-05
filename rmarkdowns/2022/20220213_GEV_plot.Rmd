@@ -1,0 +1,75 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(extRemes)
+```
+
+### 读入和合并数据
+
+```{r}
+setwd("/media/kan-dai/workspace/workcode/personal/dk_rmarkdowns/rmarkdowns/2022/")
+
+file0 <- "data/huting/pr_Amon_2-5d_regM_jpp_NC_1850-2021_ywindow-11y_GEV_ALL-logrp_2021month09_MLE.dat"
+data0 <- as.data.frame(t(read.table(file0, sep=" ")))
+names(data0) <- c("rp.min", "rp.obs", "rp.max")
+
+file1 <- "data/huting/pr_Amon_2-5d_regM_jpp_NC_1850-2021_ywindow-11y_GEV_ALL-rl_2021month09_MLE.dat"
+data1 <- as.data.frame(t(read.table(file1, sep=" ")))
+names(data1) <- c("rl.min", "rl.obs", "rl.max")
+
+data.all <- cbind(data0, data1)
+data.all['name'] <- 'ALL'
+
+
+file0 <- "data/huting/pr_Amon_2-5d_regM_jpp_NC_1850-2021_ywindow-11y_GEV_NAT-logrp_2021month09_MLE.dat"
+data0 <- as.data.frame(t(read.table(file0, sep=" ")))
+names(data0) <- c("rp.min", "rp.obs", "rp.max")
+
+file1 <- "data/huting/pr_Amon_2-5d_regM_jpp_NC_1850-2021_ywindow-11y_GEV_NAT-rl_2021month09_MLE.dat"
+data1 <- as.data.frame(t(read.table(file1, sep=" ")))
+names(data1) <- c("rl.min", "rl.obs", "rl.max")
+
+data.nat <- cbind(data0, data1)
+data.nat['name'] <- 'NAT'
+
+data <- rbind(data.all, data.nat)
+
+data
+```
+
+```{r fig.height=6, fig.width=8}
+p <- ggplot(data, aes(x=rp.obs, y=rl.obs, color=name))+
+  #geom_point(data=data.all, aes(x=rp.obs, y=rl.obs)) +
+  geom_pointrange(aes(ymin=rl.obs-0.2, ymax=rl.obs+0.2))+
+  geom_pointrange(aes(xmin=rp.obs-0.2, xmax=rp.obs+0.2))+
+  scale_x_continuous()+
+  scale_y_continuous()+
+  labs(x="Return Period", y="Return Level")+
+  theme_bw(base_size=20)
+
+print(p)
+```
+
+```{r fig.height=6, fig.width=8}
+obfile <-paste("data/huting/pr_sta_2-5d_regM_jpp_EC_1951-2021_month09.txt", sep=" ")
+obs <- read.table(file = obfile, header=F, col.names='V1')
+obs <- as.matrix(obs)
+fit <- fevd(obs,method="MLE",type="GEV",units ="%")
+plot(fit,type='rl', main="", cex.lab=1.5, lwd=3, 
+     xlim=c(1,100), ylim=c(-50,150), frame.plot=FALSE)
+abline(h=140.530, col = 'steelblue', lwd=3, lty=2)
+axis(side = 1, lwd = 2)
+axis(side = 2, lwd = 2)
+box(lwd=2)
+```
+
+```{r}
+file1 <- "data/huting/pr_Amon_hist-ssp245_2-5d_regM_jpp_NC_1850-2100_base-all_month09_sta-11y.txt"
+
+
+```

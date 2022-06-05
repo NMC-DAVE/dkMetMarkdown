@@ -1,0 +1,83 @@
+---
+title: "GSODR Data Explore"
+author: "Kan Dai"
+output: 
+  html_notebook:
+    toc: true
+    toc_depth: 2
+---
+
+# Introduction
+The GSOD or [Global Surface Summary of the Day (GSOD)](https://data.noaa.gov/dataset/dataset/global-surface-summary-of-the-day-gsod/) data provided by the US National Centers for Environmental Information (NCEI) are a valuable source of weather data with global coverage. GSODR provides four main functions for manipulating this data:
+
+* get_GSOD() - this function queries and transfers files from the NCEI’s FTP server, reformats them and returns a tidy data frame in R
+
+* reformat_GSOD() - this function takes individual station files from the local disk and re-formats them returning a tidy data frame in R
+
+* nearest_stations() - this function returns a vector of station IDs that fall within the given radius (kilometres) of a point given as latitude and longitude
+
+* update_station_list() - this function downloads the latest station list from the NCEI’s FTP server updates the package’s internal database of stations and their metadata.
+
+* get_inventory() - this function downloads the latest station inventory information from the NCEI’s FTP server and returns the header information about the latest version as a message in the console and a tidy data frame of the stations’ inventory for each month that data are reported.
+
+For more inforation see the description of the data provided by NCEI, [http://www7.ncdc.noaa.gov/CDO/GSOD_DESC.txt](http://www7.ncdc.noaa.gov/CDO/GSOD_DESC.txt).
+
+# Using getGSOD()
+
+```{r, warning=FALSE, message=FALSE}
+library(GSODR)
+library(dplyr)
+library(ggplot2)
+library(ggalt)
+library(ggthemes)
+library(maps)
+```
+
+  You can download latest station list information ad update internal database
+```{r}
+update_station_list()
+```
+
+
+## Find Stations in China
+GSODR provides lists of weather locations and elevation values. Using dplyr, we can find all the stations in China.
+
+```{r}
+load(system.file("extdata", "country_list.rda", package = "GSODR"))
+load(system.file("extdata", "isd_history.rda", package = "GSODR"))
+
+station_locations <- left_join(isd_history, country_list, by=c("CTRY" = "FIPS"))
+
+# create data.frame for Australia only
+Oz <- subset(station_locations, COUNTRY_NAME == "CHINA")
+
+Oz
+```
+
+Seletct stations whose name include "BEI".
+```{r}
+subset(Oz, grepl("BEI", STN_NAME))
+```
+
+
+## Show the distribution of ground-based weather stations
+
+```{r, warning=FALSE, message=FALSE, fig.height=8, fig.width=12}
+world <- map_data("world")
+gg <- ggplot()
+gg <- gg + geom_map(data=world, map=world, 
+                    aes(x=long, y=lat, map_id=region),
+                    color="white", fill="#7f7f7f", size=0.05, alpha=0.25)
+gg <- gg + geom_point(data=station_locations,
+                      aes(x=LON, y=LAT), color="#E69F00", size=0.3, alpha=0.4)
+gg <- gg + coord_proj("+proj=wintri")
+gg <- gg + labs(title = "The distribution of ground-based weather stations",
+                subtitle = paste("Number of stations:", as.character(nrow(station_locations))),
+                caption = "Data source: GSOD")
+gg <- gg + theme_map()
+gg <- gg + theme(strip.background=element_blank())
+gg <- gg + theme(legend.position="none")
+gg
+```
+
+

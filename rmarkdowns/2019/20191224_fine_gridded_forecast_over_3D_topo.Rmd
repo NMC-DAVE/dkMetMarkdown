@@ -1,0 +1,244 @@
+---
+title: "三维地形叠加网格预报可视化分析"
+output:
+  html_document:
+    df_print: paged
+---
+
+## 概况
+  在三维地形上叠加精细化网格预报, 分析、检验和展示精细化网格预报产品. 
+
+
+### Setup
+  安装rayshader程序库用于三维显示: install.packages("devtools")
+  安装nmcMetIO程序库用于读取Micaps服务器数据以及处理数据: devtools::install_github("nmcdev/nmcMetIO")
+
+  载入必备的程序库用于读取, 处理和可视化数据.
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(raster)
+library(png)
+library(rayshader)
+library(leaflet)
+library(metR)
+library(nmcMetIO)
+```
+
+
+## 准备地形数据
+
+### 下载和载入地形数据
+  从网站"https://www.gmrt.org/services/gridserverinfo.php#!/services/getGMRTGrid"下载地形数据. 选择覆盖延庆冬奥赛区范围(115.3~116.3, 40.1~40.7), 输出为geotiff格式, 分辨率选择最大.
+  
+  读入地形数据, 由于数据内可能存在NA值, rayshader无法处理, 可以用最低值来填充.
+```{r message=FALSE, warning=FALSE}
+# load elevation data
+elev_file <- "data/winter_olympic/yanqing_01.tif"
+elev_img <- raster::raster(elev_file)
+
+# convert it to a matrix which rayshader can handle.
+elev_matrix <- raster_to_matrix(elev_img)
+
+# fill NA values
+elev_matrix[!is.finite(elev_matrix)] <- min(elev_matrix, na.rm=TRUE)
+```
+
+### 显示地形数据在地图上的范围
+  选择地形区域为冬奥赛的延庆赛区. 从上述地形数据中获得范围的经纬度, 然后调用leaflet显示在地图上.
+```{r message=FALSE, warning=FALSE}
+
+# define bounding box with longitude/latitude coordinates
+bbox = list(p1 = list(long = 115.3, lat = 40.1),
+            p2 = list(long = 116.3, lat = 40.7))
+
+# define olympic venue
+point = list(lon=115.809968, lat=40.549504)
+
+# show the selected region for olympic region
+leaflet(width = "100%") %>%
+  addProviderTiles(providers$Esri.WorldTopoMap) %>% 
+  addRectangles(
+    lng1 = bbox$p1$long, lat1 = bbox$p1$lat, lng2 = bbox$p2$long, lat2 = bbox$p2$lat, fillColor="transparent"
+  ) %>%
+  addMarkers(
+    lng=point$lon, lat=point$lat, label="延庆赛道"
+  ) %>%
+  fitBounds(
+    lng1 = bbox$p1$long, lat1 = bbox$p1$lat, lng2 = bbox$p2$long, lat2 = bbox$p2$lat,
+  )
+```
+
+### 地形数据二维可视化
+  计算地形阴影层, 存入变量, 可以在三维地形显示是叠加到地形上. 将地形数据和阴影层叠加起来, 展示二维效果.
+```{r message=FALSE, warning=FALSE}
+# calculate rayshader layers
+ambmat <- ambient_shade(elev_matrix, zscale = 30)
+raymat <- ray_shade(elev_matrix, zscale = 30, lambert = TRUE)
+
+# plot 2D
+elev_matrix %>%
+  sphere_shade(texture = "imhof4") %>%
+  add_shadow(raymat, max_darken = 0.5) %>%
+  add_shadow(ambmat, max_darken = 0.5) %>%
+  plot_map()
+```
+
+## 地图数据
+
+  下载地图数据, 用于叠加在地形上面. 调用[get_arcgis_map_image](https://github.com/nmcdev/nmcMetIO/blob/master/R/get_map_data.R)从Arcgis服务器上获取区域的卫星影像图.
+```{r message=FALSE, warning=FALSE}
+# get map image size
+image_size <- define_image_size(bbox, major_dim = 2000)
+
+overlay_file <- "data/winter_olympic/yanqing_02_map.png"
+if(!file.exists(overlay_file)){
+  get_arcgis_map_image(bbox, map_type = "World_Topo_Map", file = overlay_file,
+                       width = image_size$width, height = image_size$height, 
+                       sr_bbox=4326)
+}
+overlay_img <- png::readPNG(overlay_file)
+plot.new() 
+rasterImage(overlay_img, 0,0,1,1)
+```
+
+
+
+
+## 显示精细化网格预报数据
+
+### 最高气温数据
+  读入精细化网格预报的日最高温度数据, 并且存入数据文件, 以备后面使用. 由于精细化网格预报为5km, 相对于小区域分辨率比较粗, 需要插值到更高分辨率网格上, 并且进行一定程度的平滑. 最后调用metR的填充等值线函数绘制, 保存图像用于后面在三维地形上面叠加.
+```{r message=FALSE, warning=FALSE}
+# load fine gridded forecast
+datafile = "data/winter_olympic/fine_gridde_forecast_max_temp.rds"
+if(!file.exists(datafile)){
+  data <- retrieve_micaps_model_grid("NWFD_SCMOC/MAXIMUM_TEMPERATURE/2M_ABOVE_GROUND/", filename="19122708.024")
+  saveRDS(data, file=datafile)
+}
+data <- readRDS(datafile)
+data <- data[lon >= bbox$p1$long & lon <= bbox$p2$long & lat >= bbox$p1$lat & lat <= bbox$p2$lat]
+
+# interpolate to olympic venue
+point_values = data[, Interpolate(var1 ~ lon + lat, point$lon, point$lat, grid=FALSE)]
+
+# smooth the data
+out <- smooth2d(data$lon, data$lat, data$var1, theta=0.03, nx=128, ny=128)
+
+# plot contour image
+colors <- c("#3D0239","#FA00FC","#090079","#5E9DF8","#2E5E7F",
+            "#06F9FB","#0BF40B","#006103","#FAFB07","#D50404","#5A0303")
+ggplot(out, aes(x, y, z = z)) +
+  geom_contour_fill(breaks=seq(-8, 6, by=0.5)) +
+  scale_fill_gradientn(name="Max\nTem", colours=colors, limits=c(-8, 6)) +
+  scale_x_continuous(expand=c(0,0)) +
+  scale_y_continuous(expand=c(0,0)) +
+  guides(fill=FALSE)+
+  theme(panel.spacing=grid::unit(0, "mm"),
+        plot.margin=grid::unit(rep(-1.25,4),"lines"),
+        axis.text=element_blank(),
+        axis.ticks=element_blank(),
+        axis.title=element_blank())
+
+overlay_file_temp <- "data/winter_olympic/fine_gridde_forecast_max_temp.png"
+ggsave(overlay_file_temp, width=image_size$width, height=image_size$height)
+```
+
+### 风场数据
+  采用metR的geom_streamline函数来绘制风场的流线图, 用于叠加在三维地形上面. 这里采用GRAPES 3km模式数据, 能更好地体现地形特征.
+```{r message=FALSE, warning=FALSE}
+# load fine gridded forecast
+datafile = "data/winter_olympic/fine_gridde_forecast_uwind.rds"
+if(!file.exists(datafile)){
+  dataU <- retrieve_micaps_model_grid("GRAPES_3KM/UGRD/10M_ABOVE_GROUND/", filename="19122708.030")
+  saveRDS(dataU, file=datafile)
+}
+dataU <- readRDS(datafile)
+datafile = "data/winter_olympic/fine_gridde_forecast_vwind.rds"
+if(!file.exists(datafile)){
+  dataV <- retrieve_micaps_model_grid("GRAPES_3KM/VGRD/10M_ABOVE_GROUND/", filename="19122708.030")
+  saveRDS(dataV, file=datafile)
+}
+dataV <- readRDS(datafile)
+dataU <- dataU[lon >= bbox$p1$long & lon <= bbox$p2$long & lat >= bbox$p1$lat & lat <= bbox$p2$lat]
+dataV <- dataV[lon >= bbox$p1$long & lon <= bbox$p2$long & lat >= bbox$p1$lat & lat <= bbox$p2$lat]
+dataUV <- merge(dataU, dataV, by=c("lon", "lat", "lev", "time", "initTime", "fhour"))
+
+# plot wind streamlines
+pobj <- ggplot(dataUV, aes(lon, lat)) +
+  geom_streamline(aes(dx=dataUV$var1.x, dy=dataUV$var1.y, size=..step.., 
+                      alpha=..step.., color=sqrt(..dx..^2 + ..dy..^2)),
+                  L=0.12, res=2, arrow=NULL, n=20, lineend="round") + 
+  viridis::scale_color_viridis(guide="none") +
+  scale_size(range=c(0,3), guide="none") +
+  scale_alpha(guide="none") +
+  scale_x_continuous(expand=c(0,0)) +
+  scale_y_continuous(expand=c(0,0)) +
+  theme(panel.spacing=grid::unit(0, "mm"),
+        plot.margin=grid::unit(rep(-1.25,4),"lines"),
+        panel.background = element_rect(fill = "transparent"), # bg of the panel
+        plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text=element_blank(),
+        axis.ticks=element_blank(),
+        axis.title=element_blank())
+
+overlay_file_wind <- "data/winter_olympic/fine_gridde_forecast_wind.png"
+png(overlay_file_wind, width=image_size$width, height=image_size$height, units="px", bg="transparent")
+pobj
+dev.off()
+pobj
+```
+
+## 三维地形分析
+
+## 地形上叠加上述生成的地图, 气温分布以及风场流线图.
+
+  使用add_overlay将卫星影响叠加在二维地形图上.
+```{r message=FALSE, warning=FALSE}
+overlay_img <- png::readPNG(overlay_file)
+overlay_img_temp <- png::readPNG(overlay_file_temp)
+overlay_img_wind <- png::readPNG(overlay_file_wind)
+
+# 2D plot with map overlay
+elev_matrix %>%
+  sphere_shade(texture = "imhof4") %>%
+  add_overlay(overlay_img, alphalayer = 0.95) %>%
+  add_overlay(overlay_img_temp, alphalayer = 0.6) %>%
+  add_overlay(overlay_img_wind, alphalayer = 0.95) %>%
+  add_shadow(raymat, max_darken = 0.4) %>%
+  add_shadow(ambmat, max_darken = 0.4) %>%
+  plot_map()
+```
+
+  显示三维地形图.
+```{r message=FALSE, warning=FALSE, fig.height=12, fig.width=15}
+zscale <- 20
+
+rgl::clear3d()
+elev_matrix %>% 
+  sphere_shade(texture = "imhof4") %>% 
+  add_overlay(overlay_img, alphalayer = 0.95) %>%
+  add_overlay(overlay_img_temp, alphalayer = 0.6) %>%
+  add_overlay(overlay_img_wind, alphalayer = 0.8) %>%
+  add_shadow(raymat, max_darken = 0.4) %>%
+  add_shadow(ambmat, max_darken = 0.4) %>%
+  plot_3d(elev_matrix, zscale = zscale, windowsize = c(1000, 800),
+          water = FALSE, soliddepth = -max(elev_matrix, na.rm=TRUE)/zscale, wateralpha = 0,
+          theta = 25, phi = 30, zoom = 0.65, fov = 60)
+Sys.sleep(10)
+render_snapshot()
+```
+
+
+```{r message=FALSE, warning=FALSE, fig.height=12, fig.width=15}
+label <- list(text=paste0("Olympic Track: ", as.character(round(point_values$var1,digits=2)), "C"))
+label$pos <- find_image_coordinates(long=point$lon, lat=point$lat, bbox=bbox, 
+                                    image_width=dim(elev_matrix)[1], image_height=dim(elev_matrix)[2])
+render_label(elev_matrix, x = label$pos$x, y = label$pos$y, z = 6500,
+             zscale = zscale, text = label$text, textsize=2, linewidth = 5, freetype=FALSE)
+
+render_snapshot()
+```
+
+

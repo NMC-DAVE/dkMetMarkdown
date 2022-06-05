@@ -1,0 +1,500 @@
+---
+title: "ggplot Wizardry Hands-On"
+output: html_notebook
+---
+
+refer to: <https://z3tt.github.io/OutlierConf2021/?s=09>
+
+```{r}
+loadedPackages <- c(
+    "tidyverse",        ## data science package collection (incl. the ggplot2 package)
+    "systemfonts",      ## use custom fonts (needs to be installed on your OS)
+    "scico",            ## scico color paletters (http://www.fabiocrameri.ch/colourmaps.php) in R 
+    "ggtext",           ## add improved text rendering to ggplot2
+    "ggforce",          ## add missing functionality to ggplot2
+    "ggdist",           ## add uncertainty visualization to ggplot2
+    "magick",           ## load images to R
+    "patchwork",        ## combine outputs from ggplot2
+    "IRdisplay"         ## 'Jupyter' Display Machinery
+)
+invisible(lapply(loadedPackages, library, character.only=TRUE, verbose=FALSE, warn.conflicts=FALSE))
+```
+
+## Data
+
+------------------------------------------------------------------------
+
+Data were collected and made available by Dr. Kristen Gorman and the Palmer Station, Antarctica LTER, a member of the Long Term Ecological Research Network.
+
+```{r}
+penguins <- 
+  readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-07-28/penguins.csv') %>% 
+  ## correct species name
+  mutate(species = if_else(species == "Adelie", "Adélie", species)) %>% 
+  ## remove missing observations
+  filter(!is.na(bill_length_mm), !is.na(bill_depth_mm))
+
+penguins
+```
+
+### A Basic ggplot
+
+```{r fig.width=12, fig.height=12}
+## simple plot: data + mappings + geometry
+ggplot(penguins, aes(x = bill_length_mm, y = bill_depth_mm)) +
+  geom_point(alpha = .6, size = 3.5) +
+  theme(text = element_text(size = 20)) 
+```
+
+```{r fig.width=12, fig.height=12}
+## change global theme settings (for all following plots)
+theme_set(theme_minimal(base_size = 16, base_family = "Open Sans"))
+
+## modify plot elements globally (for all following plots)
+theme_update(
+  axis.ticks = element_line(color = "grey92"),
+  axis.ticks.length = unit(.5, "lines"),
+  panel.grid.minor = element_blank(),
+  legend.title = element_text(size = 12),
+  legend.text = element_text(color = "grey30"),
+  plot.title = element_text(size = 22, face = "bold"),
+  plot.subtitle = element_text(size = 16, color = "grey30"),
+  plot.caption = element_text(size = 14, margin = margin(t = 15))
+)
+ggplot(penguins, aes(x = bill_length_mm, y = bill_depth_mm)) +
+  geom_point(aes(color = body_mass_g), alpha = .6, size = 3.5) + 
+  ## custom axes scaling
+  scale_x_continuous(breaks = 3:6 * 10, limits = c(30, 60)) +
+  scale_y_continuous(breaks = seq(12.5, 22.5, by = 2.5), limits = c(12.5, 22.5)) +
+  ## custom colors
+  scico::scale_color_scico(palette = "bamako", direction = -1) +
+  ## custom labels
+  labs(
+    title = 'Bill Dimensions of Brush-Tailed Penguins (Pygoscelis)',
+    subtitle = 'A scatter plot of bill depth versus bill length.',
+    caption = 'Data: Gorman, Williams & Fraser (2014) PLoS ONE',
+    x = 'Bill Length (mm)', 
+    y = 'Bill Depth (mm)',
+    color = 'Body mass (g)'
+  )
+
+```
+
+**{ggtext}**
+
+> The ggtext package provides simple Markdown and HTML rendering for ggplot2. Under the hood, the package uses the gridtext package for the actual rendering, and consequently it is limited to the feature set provided by gridtext. Support is provided for Markdown both in theme elements (plot titles, subtitles, captions, axis labels, legends, etc.) and in geoms (similar to geom_text()). In both cases, there are two alternatives, one for creating simple text labels and one for creating text boxes with word wrapping.
+
+element_markdown() → formatted text elements, e.g. titles, caption, axis text, striptext
+
+```{r fig.width=10, fig.height=10}
+## assign plot to `g` - we can ad new things to this plot later
+## (wrapped in parenthesis so it is assigned and plotted in one step)
+(gt <- ggplot(penguins, aes(x = bill_length_mm, y = bill_depth_mm)) +
+  geom_point(aes(color = body_mass_g), alpha = .6, size = 3.5) + 
+  scale_x_continuous(breaks = 3:6 * 10, limits = c(30, 60)) +
+  scale_y_continuous(breaks = seq(12.5, 22.5, by = 2.5), limits = c(12.5, 22.5)) +
+  scico::scale_color_scico(palette = "bamako", direction = -1) +
+  ## markdown formatting using asterisks
+  labs(
+    title = 'Bill Dimensions of Brush-Tailed Penguins (*Pygoscelis*)',
+    subtitle = 'A scatter plot of bill depth versus bill length.',
+    caption = 'Data: Gorman, Williams & Fraser (2014) *PLoS ONE*',
+    x = '**Bill Length** (mm)', 
+    y = '**Bill Depth** (mm)',
+    color = 'Body mass (g)'
+  ) +
+  ## render respective text elements
+  theme(
+    plot.title = ggtext::element_markdown(),
+    plot.caption = ggtext::element_markdown(),
+    axis.title.x = ggtext::element_markdown(),
+    axis.title.y = ggtext::element_markdown()
+  )
+)
+```
+
+element_markdown() in combination with HTML
+
+```{r fig.width=10, fig.height=10}
+## use HTML syntax to change text color
+gt_mar <- gt +
+  labs(title = 'Bill Dimensions of Brush-Tailed Penguins <i style="color:#28A87D;">Pygoscelis</i>') +
+  theme(plot.margin = margin(t = 25))
+
+gt_mar
+```
+
+```{r fig.width=10, fig.height=10}
+## use HTML syntax to change font and text size
+gt_mar +
+  labs(title = 'Bill Dimensions of Brush-Tailed Penguins <b style="font-size:32pt;font-family:blacksword;">Pygoscelis</b>')
+```
+
+```{r fig.width=10, fig.height=10}
+gt_mar + 
+  #labs(title = 'Bill Dimensions of Brush-Tailed Penguins <img src="https://researchgate.net/profile/Jean_Lightner/publication/274710342/figure/fig8/AS:614338578640906@1523481139381/Pygoscelis-papua-Source-Wikipedia-http-wwwenwikipediaorg.png"‚ width="100"/>') +
+  ## title with missing quotation mark to make an erroneous pdf - 
+  ## otherwise it throws an error because of RCurl on Windows OS
+  labs(title = 'Bill Dimensions of Brush-Tailed Penguins <img src="https://researchgate.net/profile/Jean_Lightner/publication/274710342/figure/fig8/AS:614338578640906@1523481139381/Pygoscelis-papua-Source-Wikipedia-http-wwwenwikipediaorg.png‚ width="100"/>') 
+```
+
+geom_richtext() → formatted text labels with 360° rotation
+
+```{r fig.width=10, fig.height=10}
+gt_rich <- ggplot(penguins, aes(x = bill_length_mm, y = bill_depth_mm)) +
+  geom_point(aes(color = species), alpha = .6, size = 3.5) + 
+  ## add text annotations for each species
+  ggtext::geom_richtext(
+    data = tibble(
+      x = c(34, 56, 54), y = c(20, 18.5, 14.5),
+      species = c("Adélie", "Chinstrap", "Gentoo"),
+      lab = c("<b style='font-family:anton;font-size:24pt;'>Adélie</b><br><i style='color:darkgrey;'>P. adéliae</i>", 
+              "<b style='font-family:anton;font-size:24pt;'>Chinstrap</b><br><i style='color:darkgrey;'>P. antarctica</i>", 
+              "<b style='font-family:anton;font-size:24pt;'>Gentoo</b><br><i style='color:darkgrey;'>P. papua</i>"),
+      angle = c(12, 20, 335)
+    ),
+    aes(x, y, label = lab, color = species, angle = angle), 
+    size = 4, fill = NA, label.color = NA,
+    lineheight = .3
+  ) +
+  scale_x_continuous(breaks = 3:6 * 10, limits = c(30, 60)) +
+  scale_y_continuous(breaks = seq(12.5, 22.5, by = 2.5), limits = c(12.5, 22.5)) +
+  rcartocolor::scale_color_carto_d(palette = "Bold", guide = "none") +
+  labs(
+    title = 'Bill Dimensions of Brush-Tailed Penguins (*Pygoscelis*)',
+    subtitle = 'A scatter plot of bill depth versus bill length.',
+    caption = 'Data: Gorman, Williams & Fraser (2014) *PLoS ONE*',
+    x = '**Bill Length** (mm)', 
+    y = '**Bill Depth** (mm)',
+    color = 'Body mass (g)'
+  )
+
+(gt_rich +
+  theme(
+    plot.title = ggtext::element_markdown(),
+    plot.caption = ggtext::element_markdown(),
+    axis.title.x = ggtext::element_markdown(),
+    axis.title.y = ggtext::element_markdown(),
+    plot.margin = margin(25, 6, 15, 6)
+  )
+)
+```
+
+```{r fig.width=10, fig.height=10}
+(gt_box <- gt_rich +
+  theme(
+    text = element_text(size=20),
+    ## turn title into filled textbox
+    plot.title = ggtext::element_textbox_simple(
+      color = "white", fill = "#28A87D",  size = 32, 
+      padding = margin(8, 4, 8, 4), margin = margin(b = 5), lineheight= .9
+    ),
+    ## add round outline to caption
+    plot.caption = ggtext::element_textbox_simple(
+      width = NULL, linetype = 1, padding = margin(4, 8, 4, 8), 
+      margin = margin(t = 15), r = grid::unit(8, "pt"), size=24
+    ),
+    axis.title.x = ggtext::element_markdown(size=22),
+    axis.title.y = ggtext::element_markdown(size=22),
+    plot.margin = margin(25, 6, 15, 6)
+  )
+)
+```
+
+geom_textbox() → formatted text boxes with word wrapping
+
+```{r fig.width=10, fig.height=10}
+gt_box +
+  ## add textbox with long paragraphs
+  ggtext::geom_textbox(
+    data = tibble(x = 34, y = 13.7, label = "<span style='font-size:12pt;font-family:anton;'>Lorem Ipsum Dolor Sit Amet</span><br><br>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."),
+    aes(x, y, label = label),
+    size = 2.2, family = "Open Sans",
+    fill = "cornsilk", box.color = "cornsilk3",
+    width = unit(11, "lines")
+  ) +
+  coord_cartesian(clip = "off")
+```
+
+**{ggforce}**
+
+> ggforce is a package aimed at providing missing functionality to ggplot2 through the extension system introduced with ggplot2 v2.0.0. Broadly speaking ggplot2 has been aimed primarily at explorative data visualization in order to investigate the data at hand, and less at providing utilities for composing custom plots a la D3.js. ggforce is mainly an attempt to address these "shortcoming" (design choices might be a better description). The goal is to provide a repository of geoms, stats, etc. that are as well documented and implemented as the official ones found in ggplot2.
+
+```{r fig.width=10, fig.height=10}
+## plot that we will annotate with gggforce afterwards
+gf <- ggplot(penguins, aes(x = bill_length_mm, y = bill_depth_mm)) + 
+  scico::scale_color_scico(palette = "bamako", direction = -1) +
+  coord_cartesian(xlim = c(25, 65), ylim = c(10, 25)) +
+  rcartocolor::scale_fill_carto_d(palette = "Bold") +
+  labs(
+    title = "Bill Dimensions of Brush-Tailed Penguins (*Pygoscelis*)",
+    subtitle = 'A scatter plot of bill depth versus bill length.',
+    caption = "Data: Gorman, Williams & Fraser (2014) *PLoS ONE*",
+    x = "**Bill Length** (mm)", 
+    y = "**Bill Depth** (mm)",
+    color = "Body mass (g)",
+    fill = "Species"
+  )
+ 
+## ellipsoids for all groups
+(gf +
+  ggforce::geom_mark_ellipse(
+    aes(fill = species, label = species), 
+    alpha = .15, show.legend = FALSE
+  ) +
+  geom_point(aes(color = body_mass_g), alpha = .6, size = 3.5)
+)
+
+```
+
+```{r fig.width=10, fig.height=10}
+## ellipsoids for specific subset
+(gf +
+  ggforce::geom_mark_ellipse(
+    aes(fill = species, label = species, filter = species == 'Gentoo'), 
+    alpha = 0, show.legend = FALSE
+  ) +
+  geom_point(aes(color = body_mass_g), alpha = .6, size = 3.5) +
+  coord_cartesian(xlim = c(25, 65), ylim = c(10, 25))
+)
+```
+
+```{r fig.width=10, fig.height=10}
+## circles
+(gf +
+  ggforce::geom_mark_circle(
+    aes(fill = species, label = species, filter = species == 'Gentoo'), 
+    alpha = 0, show.legend = FALSE
+  ) +
+  geom_point(aes(color = body_mass_g), alpha = .6, size = 3.5)
+)
+```
+
+```{r fig.width=10, fig.height=10}
+## rectangles
+(gf +
+  ggforce::geom_mark_rect(
+    aes(fill = species, label = species, filter = species == 'Gentoo'), 
+    alpha = 0, show.legend = FALSE
+  ) +
+  geom_point(aes(color = body_mass_g), alpha = .6, size = 3.5) 
+)
+```
+
+```{r fig.width=10, fig.height=10}
+## hull
+(gf +
+  ggforce::geom_mark_hull(
+    aes(fill = species, label = species, filter = species == 'Gentoo'), 
+    alpha = 0, show.legend = FALSE
+  ) +
+  geom_point(aes(color = body_mass_g), alpha = .6, size = 3.5)
+)
+```
+
+### ggplot Tricks
+
+```{r fig.width=10, fig.height=10}
+(gg0 <- 
+  ggplot(penguins, aes(x = bill_length_mm, y = bill_depth_mm)) +
+    ggforce::geom_mark_ellipse(
+      aes(fill = species, label = species), 
+      alpha = 0, show.legend = FALSE
+    ) +
+    geom_point(aes(color = body_mass_g), alpha = .6, size = 3.5) + 
+    scale_x_continuous(breaks = seq(25, 65, by = 5), limits = c(25, 65)) +
+    scale_y_continuous(breaks = seq(12, 24, by = 2), limits = c(12, 24)) +
+    scico::scale_color_scico(palette = "bamako", direction = -1) +
+    labs(
+      title = "Bill Dimensions of Brush-Tailed Penguins (*Pygoscelis*)",
+      subtitle = 'A scatter plot of bill depth versus bill length.',
+      caption = "Data: Gorman, Williams & Fraser (2014) *PLoS ONE*",
+      x = "Bill Length (mm)", 
+      y = "Bill Depth (mm)",
+      color = "Body mass (g)"
+    )
+)
+```
+
+### Left-Aligned Title
+
+```{r fig.width=10, fig.height=10}
+(gg1 <- gg0 + theme(plot.title.position = "plot"))
+```
+
+### Right-Aligned Caption
+
+```{r fig.width=10, fig.height=10}
+(gg1b <- gg1 +  theme(plot.caption.position = "plot"))
+```
+
+### Legend Design
+
+```{r fig.width=10, fig.height=10}
+(gg2 <- gg1b + theme(legend.position = "top"))
+```
+
+```{r fig.width=10, fig.height=10}
+(gg2b <- gg2 + 
+  guides(color = guide_colorbar(title.position = "top", 
+                                title.hjust = .5, 
+                                barwidth = unit(20, "lines"), 
+                                barheight = unit(.5, "lines"))))
+```
+
+### Limit Expansion
+
+```{r fig.width=10, fig.height=10}
+(gg3 <- gg2b + coord_cartesian(expand = FALSE))
+```
+
+### Geeky Details: Clipping
+
+```{r fig.width=10, fig.height=10}
+(gg3b <- gg3 + coord_cartesian(expand = FALSE, clip = "off"))
+```
+
+### White Space
+
+```{r fig.width=10, fig.height=10}
+(gg4 <- gg3b + theme(plot.margin = margin(t = 25, r = 25, b = 10, l = 25))) # top, right, bottom, left
+```
+
+### Add Images
+
+```{r fig.width=10, fig.height=10}
+## read PNG file from web
+png <- magick::image_read("https://raw.githubusercontent.com/allisonhorst/palmerpenguins/master/man/figures/culmen_depth.png")
+## turn image into `rasterGrob`
+img <- grid::rasterGrob(png, interpolate = TRUE)
+
+(gg5 <- gg4 +
+  annotation_custom(img, ymin = 21.5, ymax = 30.5, xmin = 55, xmax = 65.5) +
+    labs(caption = "Data: Gorman, Williams & Fraser (2014) *PLoS ONE* &bull; Illustration: Allison Horst"))
+```
+
+**{patchwork}**
+
+> The goal of patchwork is to make it ridiculously simple to combine separate ggplots into the same graphic. As such it tries to solve the same problem as gridExtra::grid.arrange() and cowplot::plot_grid but using an API that incites exploration and iteration, and scales to arbitrily complex layouts.
+
+```{r fig.width=10, fig.height=10}
+## calculate bill ratio and summary stats
+df_peng_stats <- 
+  penguins %>% 
+  mutate(bill_ratio = bill_length_mm / bill_depth_mm) %>% 
+  filter(!is.na(bill_ratio)) %>% 
+  group_by(species) %>% 
+  mutate(
+    n = n(),
+    median = median(bill_ratio),
+    max = max(bill_ratio)
+  ) %>% 
+  ungroup() %>% 
+  mutate(species_num = as.numeric(fct_rev(species))) 
+
+## create a second chart with raincloud plots
+p2 <- 
+  ggplot(df_peng_stats, aes(bill_ratio, species_num, color = species)) +
+  stat_summary(
+    geom = "linerange",
+    fun.min = function(x) -Inf,
+    fun.max = function(x) median(x, na.rm = TRUE),
+    linetype = "dotted",
+    orientation = "y",
+    size = .7
+  ) +
+  geom_point(
+    aes(y = species_num - .15), 
+    shape = "|",
+    size = 5,
+    alpha = .33
+  ) +
+  ggdist::stat_halfeye(
+    aes(
+      y = species_num,
+      color = species,
+      fill = after_scale(colorspace::lighten(color, .5))
+    ),
+    shape = 18,
+    point_size = 3,
+    interval_size = 1.8,
+    adjust = .5,
+    .width = c(0, 1)
+  ) +
+  geom_text(
+    aes(x = median, label = format(round(median, 2), nsmall = 2)),
+    stat = "unique",
+    color = "white",
+    family = "Open Sans",
+    fontface = "bold",
+    size = 3.4,
+    nudge_y = .15
+  ) +
+  geom_text(
+    aes(x = max, label = glue::glue("n = {n}")),
+    stat = "unique",
+    family = "Open Sans",
+    fontface = "bold",
+    size = 3.5,
+    hjust = 0,
+    nudge_x = .01,
+    nudge_y = .02
+  ) +
+  coord_cartesian(clip = "off", expand = FALSE) +
+  scale_x_continuous(
+    limits = c(1.6, 3.8),
+    breaks = seq(1.6, 3.8, by = .2)
+  ) +
+  scale_y_continuous(
+    limits = c(.55, NA),
+    breaks = 1:3,
+    labels = c("Gentoo", "Chinstrap", "Adélie")
+  ) +
+  scale_color_manual(values = c("#3d6721", "#a86826", "#006c89"), guide = "none") +
+  scale_fill_manual(values = c("#3d6721", "#a86826", "#006c89"), guide = "none") +
+  labs(
+    x = "Bill ratio",
+    y = NULL,
+    subtitle = "B. Raincloud plot shwoing the distribution of bill ratios, estimated as bill length divided by bill depth.",
+    caption = "Data: Gorman, Williams & Fraser (2014) *PLoS ONE* &bull; Illustration: Allison Horst"
+  ) +
+  theme(
+    panel.grid.major.x = element_line(size = .35),
+    panel.grid.major.y = element_blank(),
+    axis.text.y = element_text(size = 13),
+    axis.ticks.length = unit(0, "lines"),
+    plot.title.position = 'plot',
+    plot.subtitle = element_text(margin = margin(t = 5, b = 10)),
+    plot.margin = margin(10, 25, 10, 25)
+  )
+
+p2
+```
+
+```{r fig.width=10, fig.height=10}
+## combine both plots
+(gg5 + labs(caption = NULL, subtitle = "A. Scatter plot of bill depth versus bill length.")) / p2 +
+  plot_layout(heights = c(1, .65))
+```
+
+## Another Example for Clipping
+
+```{r fig.width=10, fig.height=10}
+## with clipping
+(on <- mtcars %>% 
+  rownames_to_column() %>% 
+  ggplot(aes(mpg, fct_reorder(rowname, mpg))) + 
+    geom_point(size = 4, shape = "diamond", color = "firebrick") + 
+    geom_text(aes(label = rowname), nudge_x = .35, hjust = 0, family = "Open Sans", size = 3.3) +     
+    theme_void(base_size = 8, base_family = "Open Sans") + 
+    theme(axis.line.x = element_line(color = "grey40"), 
+          axis.text.x = element_text(color = "grey40"), 
+          axis.ticks.x = element_line(color = "grey40"), 
+          axis.ticks.length.x = unit(.4, "lines"), 
+          plot.margin = margin(10, 45, 10, 20))
+) 
+```
+
+```{r fig.width=10, fig.height=10}
+on + coord_cartesian(clip = "off")
+```

@@ -1,0 +1,103 @@
+---
+title: "金沙江堰塞湖气象观测分析"
+output:
+  html_notebook: default
+---
+
+  2018年11月4日，金沙江堰塞湖再次发生了塌方，河道被堵。四川省气象局和西藏自治区气象局在滑坡点附近架设了临时观测点。
+
+```{r, warning=FALSE, message=FALSE}
+# load library
+library(tidyr)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(ggthemes)
+library(cowplot)
+library(DT)
+library(dkMetIO)
+```
+
+  滑坡点附近观测站点分布：
+```{r, fig.width=8, fig.asp=1}
+library(leaflet)
+
+# get observation stations
+stations = cimiss_obs_in_rect_by_time('20181108000000', 30.5, 98.15, 31.5, 99.35,
+                                      elements="Station_Name,Station_Id_C,Station_Id_d,Lat,Lon,Alti",
+                                      dataCode = "SURF_CHN_MUL_HOR")
+stations <- stations %>%
+  transmute(ID = Station_Id_d,
+            Name = Station_Name,
+            Lat = as.numeric(Lat),
+            Lon = as.numeric(Lon),
+            Alti = as.numeric(Alti))
+
+m <- leaflet(data=stations) %>%
+  addProviderTiles(providers$Esri.WorldImagery) %>%
+  addMarkers(~Lon, ~Lat, popup=~ID, label=~Name)
+m
+```
+
+
+
+  读入离滑坡点距离最近的观测站观测数据:
+```{r, warning=FALSE, message=FALSE}
+# retrieve JinSha observations
+timeRange = "[20181105000000,20181109000000]"
+dataCode = "SURF_CHN_MUL_HOR"
+elements = "Station_Id_d,Lat,Lon,Alti,Datetime,TEM,RHU,PRE_1h,WIN_D_Avg_10mi,WIN_S_Avg_10mi,WIN_S_Max"
+staIds = "S0980"
+obsData <- cimiss_obs_by_time_range_and_staID(timeRange,dataCode=dataCode,elements=elements,staIds=staIds)
+datatable(obsData)
+```
+
+
+  显示站点的温度和相对湿度观测曲线:
+```{r}
+# select elements
+obs <- obsData %>%
+  transmute(ID = as.numeric(Station_Id_d),
+            Datetime = parse_date_time(Datetime, "%Y%m%d%H%M%S"),
+            Temperature = as.numeric(TEM),
+            RelativeHumidity = as.numeric(RHU))
+
+ggplot(data=obs, aes(x=Datetime)) + 
+  geom_line(aes(y=Temperature, colour="Temperature"), size=0.8) +
+  geom_line(aes(y=RelativeHumidity/4-12, colour="Relative Humidity"), size=0.8) +
+  scale_y_continuous(sec.axis = sec_axis(~.*4+50, name = "Relative humidity [%]")) + 
+  scale_colour_manual(values = c("blue", "red")) +
+  labs(y = "Air temperature [°C]",
+       x = "Date and time",
+       colour = "Parameter") +
+  theme(legend.position = c(0.8, 0.9))
+```
+  显示滑坡点附近的风速观测:
+```{r, fig.width=8, fig.asp=1}
+# select elements
+obs <- obsData %>%
+  transmute(ID = as.numeric(Station_Id_d),
+            Datetime = parse_date_time(Datetime, "%Y%m%d%H%M%S"),
+            WIN_D_Avg_10mi=as.numeric(WIN_D_Avg_10mi), 
+            WIN_S_Avg_10mi=as.numeric(WIN_S_Avg_10mi),
+            WIN_S_Max = as.numeric(WIN_S_Max))
+
+p1 <- ggplot(data=obs, aes(x=Datetime, y=WIN_D_Avg_10mi))+
+  geom_point(size=2) + 
+  geom_line(size=0.9) + 
+  labs(y = "Wind direction", x = "Date and time") +
+  theme_gray()
+
+p2 <- ggplot(data=obs, aes(x=Datetime))+
+  geom_line(aes(y=WIN_S_Avg_10mi, color="10m avg wind speed"), size=0.9) + 
+  geom_line(aes(y=WIN_S_Max, color="1h max wind speed"), size=0.9) + 
+  scale_colour_manual(values = c("blue", "red")) +
+  labs(y = "Wind speed (m/s)", x = "Date and time", colour = "Parameter") +
+  theme(legend.position = c(0.8, 0.9))
+
+plot_grid(p1, p2, labels = c("A", "B"), nrow=2, align = "v")
+
+```
+
+
+

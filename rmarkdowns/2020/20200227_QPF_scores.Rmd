@@ -1,0 +1,218 @@
+---
+title: "定量降水预报评分分析"
+author: "[Kan Dai](https://github.com/nmcdev)"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_section: true
+    self_contained: yes
+    css: !expr system.file("rmarkdown","templates","nmc_notebook_template",
+           "resources","corp-styles.css",package="nmcMetResources")
+    highlight: pygments
+    includes:
+      after_body: !expr system.file("rmarkdown","templates","nmc_notebook_template",
+                    "resources","footprint.html",package="nmcMetResources")
+    code_folding: show
+---
+
+<img src="https://raw.githubusercontent.com/nmcdev/nmcMetResources/master/inst/extdata/nmc_large.png" style="position:absolute;top:10px;right:100px;" width="100" height="100"/>
+
+<hr style="height:8px;">
+
+> 国家气象中心天气预报技术研发室
+
+# Overview
+
+分析国家气象中心暴雨预报质量逐年的变化趋势。暴雨站点的hits, false alarms, misses, correct negativess数据由韦青提供。
+
+# Environmental Setup
+
+```{r warning=FALSE, message=FALSE}
+
+# loading libraries
+library(tidyverse)
+library(readxl)
+library(DT)
+library(hrbrthemes)
+library(ggrepel)
+library(showtext)
+
+# load font
+showtext_auto(enable = TRUE)
+font_add("simhei", "simhei.ttf")
+font_add("simkai", "simkai.ttf")
+font_add('simsun', 'simsun.ttc')
+```
+
+# Retrieve Data
+
+读入2008年以来逐年暴雨预报站点检验数据, A, B, C, D分别表示hits, false alarms, misses, correct negatives, 具体可以参照[澳大利亚气象局检验说明网站](https://www.cawcr.gov.au/projects/verification/).
+
+```{r warning=FALSE, message=FALSE}
+scores <- read_excel("./data/Scores/QPF_scores_50mm.xlsx")
+datatable(scores, rownames=FALSE, options=list(pageLength=15, scrollX=T))
+```
+
+# Prepare Data
+
+计算暴雨预报的TS, BS和准确率评分, 具体定义请参照 <https://www.cawcr.gov.au/projects/verification/>.
+
+```{r warning=FALSE, message=FALSE}
+scores <- scores %>% 
+  mutate(
+    Threat_Score=forecaster_A/(forecaster_A+forecaster_B+forecaster_C),
+    Bias_Score=(forecaster_A+forecaster_B)/(forecaster_A+forecaster_C),
+    Accuracy=(forecaster_A+forecaster_D)/(forecaster_A+forecaster_B+forecaster_C+forecaster_D)
+    )
+datatable(scores, rownames=FALSE, options=list(pageLength=15, scrollX=T))
+```
+
+    由于该趋势要对外进行展示，采用传统的TS评分太低，故而刘凑华提出正确率评分的计算方法，即不仅要考虑报对且出现暴雨的站数，而且要考虑没有报也没有出现暴雨的站数。
+
+```{r warning=FALSE, message=FALSE}
+scores <- scores %>% 
+  mutate(
+    correct_negatives_score = forecaster_D/(forecaster_A+forecaster_B+forecaster_D),
+    Correct_TS=(Threat_Score + correct_negatives_score)*100./2.0,
+    )
+datatable(scores, rownames=FALSE, options=list(pageLength=15, scrollX=T))
+```
+
+    此外，朱老师也提出使用变换方法，直接将TS评分变换放大, 但对于暴雨评分仍然存在偏小的问题.
+
+```{r warning=FALSE, message=FALSE}
+scores <- scores %>% 
+  mutate(
+    TS_sqrt=sqrt(Threat_Score),
+    TS_exp=(1-exp(-Threat_Score))/(1-exp(-1.)),
+    )
+datatable(scores, rownames=FALSE, options=list(pageLength=15, scrollX=T))
+```
+
+    考虑将正确率和指数变换结合起来, 形成一个新的评分方法. 同时，也参考[机器学习提出的算法](https://towardsdatascience.com/a-walk-through-imbalanced-classes-in-machine-learning-through-a-visual-cheat-sheet-974740b19094)
+
+```{r warning=FALSE, message=FALSE}
+scores <- scores %>% 
+  mutate(
+    Correct_TS_sqrt=(TS_sqrt + correct_negatives_score)*100./2,
+    Correct_TS_exp=(TS_exp + correct_negatives_score)*100./2,
+    Precision=forecaster_A/(forecaster_A+forecaster_B),
+    Rcall=forecaster_A/(forecaster_A+forecaster_C),
+    F1_score=2*(Precision*Rcall)/(Precision+Rcall),
+    )
+datatable(scores, rownames=FALSE, options=list(pageLength=15, scrollX=T))
+```
+
+# Explore and Visualization
+
+TS评分的逐年变化曲线
+
+```{r warning=FALSE, message=FALSE, fig.width=9, fig.height=9, fig.asp=0.7, fig.showtext=TRUE, fig.retina=1}
+ggplot(data=scores, aes(x=Year, y=Threat_Score))+
+  geom_line(aes(y=Threat_Score), colour="#2f333d", size=2) + 
+  geom_point(aes(y=Threat_Score), colour="#2f333d", size=6) +
+  geom_smooth(method='lm',se=FALSE,colour="#ec4339", size=2, linetype = "dashed") +
+  geom_text_repel(aes(y=Threat_Score, label=sprintf("%.3f", Threat_Score)), 
+                  min.segment.length=0, nudge_y=0.008, nudge_x=-0.001, family='simhei', size=5)+
+  scale_x_continuous(breaks=scores$Year, expand=c(0.1,0.1)) + 
+  ylim(0.15, 0.23) +
+  labs(y="", x="",
+       title="国家气象中心暴雨预报质量逐年变化曲线 ",
+       subtitle="2008-2019年全国范围24小时时效暴雨预报的TS评分 ",
+       caption="采用全国2400个站点日降水量观测作为真值, 暴雨定义为日降水量大于50毫米. \n TS=NA/(NA+NB+NC), 其中NA为正确有, NB为空报, NC为漏报.") +
+  theme_ipsum(grid="Y", base_family='simhei', 
+              base_size=16, axis_title_size=16,
+              plot_title_size=22, subtitle_size=14,
+              caption_family='simsun', caption_margin=0) +
+  theme(axis.text.y=element_blank())
+
+ggsave(filename="./images/qpf_heavy_rain_correct_TS.png", dpi=100, type="cairo")
+```
+
+6-7月QPF评分曲线
+
+```{r warning=FALSE, message=FALSE, fig.width=9, fig.height=9, fig.asp=0.7, fig.showtext=TRUE, fig.retina=1}
+Year <- seq(2008, 2020)
+Threat_Score <- c(0.1558, 0.1896, 0.196, 0.1989, 0.1707, 0.2168, 0.1724, 0.2137, 0.2262, 0.2472, 0.211, 0.2228, 0.228)
+scores <- data.frame(Year, Threat_Score)
+
+ggplot(data=scores, aes(x=Year, y=Threat_Score))+
+  geom_line(aes(y=Threat_Score), colour="#2f333d", size=2) + 
+  geom_point(aes(y=Threat_Score), colour="#2f333d", size=6) +
+  geom_smooth(method='lm',se=FALSE,colour="#ec4339", size=2, linetype = "dashed") +
+  geom_text_repel(aes(y=Threat_Score, label=sprintf("%.3f", Threat_Score)), 
+                  min.segment.length=0, nudge_y=0.008, nudge_x=-0.001, family='simhei', size=5)+
+  scale_x_continuous(breaks=scores$Year, expand=c(0.1,0.1)) + 
+  ylim(0.14, 0.25) +
+  labs(y="", x="",
+       title="国家气象中心暴雨预报质量逐年变化曲线 ",
+       subtitle="2008-2019年6月1日—7月14日全国范围24小时时效暴雨预报的TS评分 ",
+       caption="采用全国2400个站点日降水量观测作为真值, 暴雨定义为日降水量大于50毫米. \n TS=NA/(NA+NB+NC), 其中NA为正确有, NB为空报, NC为漏报.") +
+  theme_ipsum(grid="Y", base_family='simhei', 
+              base_size=16, axis_title_size=16,
+              plot_title_size=22, subtitle_size=14,
+              caption_family='simsun', caption_margin=0) +
+  theme(axis.text.y=element_blank())
+
+ggsave(filename="./images/qpf_heavy_rain_correct_TS_6-8.png", dpi=100, type="cairo")
+```
+
+正确率的逐年变化曲线
+
+```{r warning=FALSE, message=FALSE, fig.width=9, fig.height=9, fig.asp=0.7, fig.showtext=TRUE, fig.retina=1}
+
+ggplot(data=scores, aes(x=Year, y=Correct_TS))+
+  geom_line(aes(y=Correct_TS), colour="#2f333d", size=2) + 
+  geom_point(aes(y=Correct_TS), colour="#2f333d", size=6) +
+  geom_smooth(method='lm',se=FALSE,colour="#ec4339", size=2, linetype = "dashed") +
+  geom_text_repel(aes(y=Correct_TS, label=sprintf("%.1f%%", Correct_TS)), 
+                  min.segment.length=0, nudge_y=0.8, nudge_x=-0.1, family='simhei', size=5)+
+  scale_x_continuous(breaks=scores$Year, expand=c(0.1,0.1)) + 
+  ylim(56.5, 61) +
+  labs(y="", x="",
+       title="国家气象中心暴雨预报质量逐年变化曲线 ",
+       subtitle="2008-2019年全国范围24小时时效暴雨预报的正确率(%)评分 ",
+       caption="采用全国2400个站点日降水量观测作为真值, 暴雨定义为日降水量大于50毫米. \n 正确率=(NA/(NA+NB+NC) + ND/(NB+NC+ND))/2, 其中NA为正确有, NB为空报, NC为漏报, ND为正确无.") +
+  theme_ipsum(grid="Y", base_family='simhei', 
+              base_size=16, axis_title_size=16,
+              plot_title_size=22, subtitle_size=14,
+              caption_family='simsun', caption_margin=0) +
+  theme(axis.text.y=element_blank())
+
+ggsave(filename="./images/qpf_heavy_rain_correct_TS.png", dpi=100, type="cairo")
+```
+
+```{r warning=FALSE, message=FALSE, fig.width=9, fig.height=9, fig.asp=0.7, fig.showtext=TRUE, fig.retina=1}
+ggplot(data=scores, aes(x=Year, y=Correct_TS_sqrt))+
+  geom_line(aes(y=Correct_TS_sqrt), colour="#2f333d", size=2) + 
+  geom_point(aes(y=Correct_TS_sqrt), colour="#2f333d", size=6) +
+  geom_smooth(method='lm',se=FALSE,colour="#ec4339", size=2, linetype = "dashed") +
+  geom_text_repel(aes(y=Correct_TS_sqrt, label=sprintf("%.1f%%", Correct_TS_sqrt)), 
+                  min.segment.length=0, nudge_y=0.8, nudge_x=-0.1, family='simhei', size=5)+
+  scale_x_continuous(breaks=scores$Year, expand=c(0.1,0.1)) + 
+  ylim(68, 73) +
+  labs(y="", x="",
+       title="国家气象中心暴雨预报质量逐年变化曲线 ",
+       subtitle="2008-2019年全国范围24小时时效暴雨预报的正确率(%)评分 ",
+       caption="采用全国2400个站点日降水量观测作为真值, 暴雨定义为日降水量大于50毫米. \n 正确率=(SQRT(NA/(NA+NB+NC))+ND/(NB+NC+ND))/2, 其中NA为正确有, NB为空报, NC为漏报, ND为正确无.") +
+  theme_ipsum(grid="Y", base_family='simhei', 
+              base_size=16, axis_title_size=16,
+              plot_title_size=22, subtitle_size=14,
+              caption_family='simsun', caption_margin=0) +
+  theme(axis.text.y=element_blank())
+
+ggsave(filename="./images/qpf_heavy_rain_correct_TS_sqrt.png", dpi=100, type="cairo")
+```
+
+```{r warning=FALSE, message=FALSE, fig.width=8, fig.height=8, fig.asp=0.8}
+ggplot(data=scores, aes(x=Year, y=Correct_TS))+
+  geom_col(aes(y=Correct_TS), fill="#5f7ea0", width=0.6) + 
+  geom_text(aes(y=Correct_TS+0.5, label = paste(as.character(Correct_TS), "%")), vjust = 0.2, hjust = 1) +
+  coord_flip(clip="on", expand=FALSE) + 
+  geom_text(aes(y=Correct_TS, label=sprintf("%.1f%%", Correct_TS)), vjust=0.2, hjust=0.5) +
+  scale_y_continuous(limits=c(56.5, 60.5), oob=rescale_none) + 
+  theme_ipsum(grid=FALSE, axis=FALSE, ticks=FALSE)
+```

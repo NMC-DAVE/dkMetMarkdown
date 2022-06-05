@@ -1,0 +1,36 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, warning=FALSE, message=FALSE}
+library(rnoaa)
+library(plyr)
+
+options(noaakey = "tHAuiyjmYKSupdQBRMpNavOyDwcKrCoi")
+```
+
+  [rnoaa](https://github.com/ropensci/rnoaa), from rOpenSci offers tools for interacting with and downloading weather data from the United States National Oceanic and Atmospheric Administration but lacks support for GSOD data.
+  
+  Tutorial:
+  * https://ropensci.org/tutorials/rnoaa_tutorial/
+
+
+## NOAA NCDC climate data
+* using the NOAA API version 2
+* Docs for the NCDC API are at [http://www.ncdc.noaa.gov/cdo-web/webservices/v2](http://www.ncdc.noaa.gov/cdo-web/webservices/v2)
+
+```{r}
+# Fetch list of city locations in descending order.
+ncdc_locs(locationcategoryid = "CITY", sortfield = "name", sortorder = "desc")
+```
+
+```{r}
+# Get info on a station by specifying a datasetid, locationid, and stationid
+ncdc_stations(datasetid='GHCND', locationid='FIPS:12017', stationid='GHCND:USC00084289')
+```
+```{r}
+out <- ncdc(datasetid='NORMAL_DLY', stationid='GHCND:USW00014895', datatypeid='dly-tmax-normal', startdate = '2010-01-01', enddate = '2010-12-10', limit = 300)
+ncdc_plot(out)
+```
+

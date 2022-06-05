@@ -1,0 +1,69 @@
+---
+title: "计算和显示山体阴影"
+output: html_notebook
+---
+
+如何利用ggplot2来绘制山体阴影效果图.
+
+refer to:
+
+-   <https://gist.github.com/dirkseidensticker/ce98c6adfe16d5e4590e95c587ea0432>
+
+-   <https://gist.github.com/simonohanlon101/2972862>
+
+```{r}
+library(elevatr)
+library(ggplot2)
+library(raster)
+library(rgdal)
+library(rnaturalearth)
+library(sp)
+library(sf)
+
+library(ggnewscale)
+```
+
+### 读入地形数据
+
+```{r}
+# 设置空间范围
+locations <- data.frame(x=c(115.2, 116.2), y=c(40.15,40.65))
+
+# 下载地形数据
+dem <- get_elev_raster(locations=locations, prj=sf::st_crs(4326), z=9, clip="bbox")
+```
+
+```{r}
+# 计算坡度和阴影
+slope = terrain(dem, opt='slope')
+aspect = terrain(dem, opt='aspect')
+hill = hillShade(slope, aspect, 40, 270)
+
+dem_spdf <- as(dem, "SpatialPixelsDataFrame")
+dem_spdf <- as.data.frame(dem_spdf)
+colnames(dem_spdf) <- c("value", "x", "y")
+
+hill_spdf <- as(hill, "SpatialPixelsDataFrame")
+hill_spdf <- as.data.frame(hill_spdf)
+colnames(hill_spdf) <- c("value", "x", "y")
+```
+
+```{r}
+# 获得河流和湖泊信息
+rivers10 <- ne_download(scale = 10, type = 'rivers_lake_centerlines', category = 'physical')
+lakes10 <- ne_download(scale = 10, type = 'lakes', category = 'physical')
+```
+
+```{r}
+# plot with different color scales
+ggplot() +
+  geom_tile(data = hill_spdf, aes(x = x, y = y, fill = value)) +
+  scale_fill_gradient(low = "black", high = "white") +
+  new_scale_fill() +
+  geom_tile(data = dem_spdf, aes(x = x, y = y, fill = value), alpha=0.4) +
+  scale_fill_gradientn(colours = rev(terrain.colors(10))) +
+  scale_x_continuous("", expand = c(0, 0)) +
+  scale_y_continuous("", expand = c(0, 0)) +
+  theme_bw() +
+  theme(legend.position="none")
+```

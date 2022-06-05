@@ -1,0 +1,94 @@
+---
+title: "ggplot2的绘制地图"
+author: "Kan Dai"
+date: "2021/4/11"
+output: html_notebook
+---
+
+本文档用于学习实践ggplot2的地图绘制技巧.
+
+## ggsf: 支持sf对象的绘制
+
+ggplot2内置了一系列的geom, stat 和 coord用于对sf数据对象进行可视化. 对于简单应用, `geom_sf`, `stat_sf`和`coord_sf`使用即可, 对于文字和标记, geom_sf_text()和geom_sf_label().
+
+### geom_sf, coord_sf与常规geom对象混合使用
+
+最新版本的ggplot2支持geom_sf, coord_sf与常规geom对象混合使用, 这主要得益于`coord_sf`默认地图坐标系为经纬度坐标系, 这对于不是sf数据结构对象的使用非常方便, 同时也使得xlim和ylim设置可以使用经纬度, 更加方便.
+
+```{r}
+library(tidyverse)
+library(sf)
+
+china_map <- st_read(system.file("extdata/bou2_4p.shp", package="nmcMetResources"), quiet=TRUE)
+china_map <- st_set_crs(china_map, 4326)
+
+df <- data.frame(lat=30, long=115, name="Test Label")
+
+ggplot(df, aes(x=long, y=lat)) +
+  geom_sf(data=china_map, size=0.2, fill="white", inherit.aes = FALSE) +
+  geom_point()+
+  geom_text(aes(label=name), hjust=-.1, vjust=1.1)+
+  coord_sf(crs=st_crs(4508), expand = FALSE, xlim=c(90,124), ylim=c(20, 44))
+```
+
+可以与任何geom绘图函数进行组合.
+
+```{r}
+library(ggforce)
+
+df <- read_csv(file=
+    "name, population, lat, long
+     test1, 827097, 30, 115
+     test2, 451066, 28, 113
+     test3, 285341, 32, 112.5
+     test4, 257636, 35, 110
+     test5, 241218, 26, 108")
+
+
+ggplot(df, aes(x=long, y=lat)) +
+  geom_sf(data=china_map, size=0.2, fill="white", inherit.aes = FALSE) +
+  geom_point()+
+  geom_mark_hull()+
+  coord_sf(crs=st_crs(4508), expand = FALSE, xlim=c(90,124), ylim=c(20, 44))
+```
+
+当然可以用annotation_map来绘制地图, 但该地图对于中国的范围并不友好.
+
+```{r}
+ggplot()+
+  annotation_map(map_data('world', region="china"), fill="antiquewhite", color="darkgrey")+
+  coord_sf(crs=st_crs(4508), expand = FALSE, xlim=c(90,124), ylim=c(20, 44))
+```
+
+可以使用annotation_spatial来将读入sf对象转化为ggplot2层
+
+```{r}
+library(ggspatial)
+
+china_map <- st_read(system.file("extdata/bou2_4p.shp", package="nmcMetResources"), quiet=TRUE)
+china_map <- st_set_crs(china_map, 4326)
+
+ggplot()+
+  annotation_spatial(china_map,  fill="antiquewhite", color="darkgrey") +
+  coord_sf(crs=st_crs(4508), expand = FALSE, xlim=c(90,124), ylim=c(20, 44))
+```
+
+一个综合使用的例子, 标记位置.
+
+```{r}
+library(ggplot2)
+library(ggrepel)
+
+cities <- data.frame(
+  x = c(-63.58595, 116.41214, 13.50, -149.75),
+  y = c(44.64862, 40.19063, 52.51, 61.20),
+  city = c("Halifax", "Beijing", "Berlin", "Anchorage")
+)
+
+ggplot(cities, aes(x,y)) +
+  annotation_map(map_data("world"), fill="antiquewhite", color="darkgrey", size=0.1) +
+  geom_point() + 
+  geom_text_repel(aes(label=city), box.padding=unit(20,"pt")) +
+  coord_sf(crs=3995, lims_method = "box")
+
+```

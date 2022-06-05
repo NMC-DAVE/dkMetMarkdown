@@ -1,0 +1,107 @@
+---
+title: "Accessing OpenStreetMap data with R"
+output: html_notebook
+---
+
+  The original article was published on [dominicroye](https://dominicroye.github.io/en/2018/accessing-openstreetmap-data-with-r/)
+
+[Open Street Maps](http://overpass-turbo.eu/)包含了街道、高速公路、医院等位置信息.
+
+# 首先安装必须的程序库.
+```{r, warning=FALSE, message=FALSE}
+#install the osmdata, sf, tidyverse and ggmap package
+if(!require("osmdata")) install.packages("osmdata")
+if(!require("tidyverse")) install.packages("tidyverse")
+if(!require("sf")) install.packages("sf")
+if(!require("ggmap")) install.packages("ggmap")
+
+#load packages
+library(tidyverse)
+library(osmdata)
+library(sf)
+library(ggmap)
+```
+
+# 查询数据
+
+## 查看可用OSM特征数据
+```{r}
+#the first five features
+head(available_features())
+
+#amenities
+head(available_tags("amenity"))
+
+#shops
+head(available_tags("shop"))
+```
+
+## 检索数据
+
+使用 getbb() 来创建指定地方的地理范围.opq() 用于构建查询语句. add_osm_feature( ) 用于实施过滤条件.
+
+```{r}
+#building the query
+q <- getbb("Madrid")%>%
+  opq()%>%
+  add_osm_feature("amenity", "cinema")
+
+str(q) #query structure
+```
+
+用 osmdata_*( ) 发送检索命令到服务器, 然后返回相应格式的数据.
+
+```{r}
+cinema <- osmdata_sf(q)
+cinema
+```
+
+## 可视化数据
+
+检索得到的sf对象可以在ggplot2中使用geom_sf()直接显示. 另外可以使用ggmap的get_map()下载地图背景.
+
+```{r, warning=FALSE, message=FALSE}
+#our background map
+mad_map <- get_map(getbb("Madrid"),maptype = "toner-background")
+
+#final map
+ggmap(mad_map)+
+  geom_sf(data=cinema$osm_points,
+          inherit.aes =FALSE,
+          colour="#238443",
+          fill="#004529",
+          alpha=.5,
+          size=4,
+          shape=21)+
+  labs(x="",y="")
+```
+
+## 找到指定范围内的超市
+
+```{r}
+#bounding box for the Iberian Peninsula
+m <- matrix(c(-10,5,30,46),ncol=2,byrow=TRUE)
+row.names(m) <- c("x","y")
+names(m) <- c("min","max")
+
+#building the query
+q <- m %>% 
+      opq (timeout=25*100) %>%
+         add_osm_feature("name","Mercadona")%>%
+         add_osm_feature("shop","supermarket")
+
+#query
+mercadona <- osmdata_sf(q)
+
+#final map
+ggplot(mercadona$osm_points)+
+  geom_sf(colour="#08519c",
+          fill="#08306b",
+          alpha=.5,
+          size=1,
+          shape=21)+
+  coord_sf(datum=NA)+
+  theme_void()
+```
+
+

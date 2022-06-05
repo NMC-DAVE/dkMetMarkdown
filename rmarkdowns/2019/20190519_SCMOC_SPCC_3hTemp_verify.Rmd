@@ -1,0 +1,38 @@
+---
+title: "国省格点预报逐3小时温度预检验评估"
+author: 国家气象中心 天气预报技术研发室
+date: 2019年5月19日
+output:
+  html_notebook:
+    number_section: true
+---
+
+# 简介
+  国家级与省级网格预报的24小时时效内、逐3小时间隔温度预报检验评估分析.
+  
+```{r, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+```
+
+# 国家级及省级网格预报绝对误差分析
+
+# 省级相对于国家级预报的负技巧占比
+```{r, fig.width=12, fig.height=9}
+skill <- read.table('data/20190519_3h_temp_verif/负技巧比例4月.dat', header=FALSE)
+names(skill) <- c("name", "03h", "06h", "09h", "12h", "15h", "18h", "21h", "24h")
+skill <- gather(skill, "valid.hour", "skill", -name)
+
+# 
+g <- ggplot(skill, aes(name, skill))+
+  geom_col(fill="#CEA438") +
+  facet_grid(valid.hour~.)
+g
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.

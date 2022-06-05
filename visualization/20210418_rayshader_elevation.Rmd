@@ -1,0 +1,155 @@
+---
+title: "Elevation - DGM of Beijing by Federal Agency for Cartography and Geodesy of Germany as Shaded Hill Map"
+output: html_notebook
+---
+
+参照<https://github.com/Z3tt/30DayMapChallenge/tree/master/contributions/Day11_Elevation>，绘制地形阴影图像。数据来自于<https://download.geoservice.dlr.de/TDM90/>，即德国TDM90米高精度地形数据.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = F)
+```
+
+```{r message=FALSE, warning=FALSE}
+
+# 载入必要的库
+library(tidyverse)
+library(raster)
+library(rayshader)
+library(gdalUtils)
+library(sf)
+
+# 设置数据目录
+datadir <- file.path(here::here(),"rmarkdowns","2021", "data", "TDM90_DEM")
+```
+
+## 绘制地形的山体阴影图
+
+```{r prep-data}
+
+# load DEM data
+dgm <- raster::raster(file.path(datadir, "TDM1_DEM__30_N40E115_DEM.tif"))
+
+# And convert it to a matrix:
+elmat = raster_to_matrix(dgm)
+
+# compute ray shade
+raymat <- ray_shade(elmat)
+ambmat <- ambient_shade(elmat)
+```
+
+```{r}
+elmat %>%
+  sphere_shade(texture = "desert") %>%
+  plot_map()
+```
+
+```{r fig.width=12, fig.height=12}
+elmat %>%
+  #sphere_shade(texture = create_texture("#fbfbfb", "#967d64", "#647D4B", "#fbfbfb", "#446b44"), ## v2
+  sphere_shade(texture = create_texture("#ffeede", "#685445", "#304c30", "#364624", "#467d40"),
+               sunangle = 290) %>%
+  add_shadow(raymat) %>%
+  add_shadow(ambmat) %>%
+  add_water(detect_water(elmat), color = "white") %>% 
+  plot_map() 
+```
+
+```{r fig.width=12, fig.height=12}
+elmat %>%
+  sphere_shade(texture = create_texture("#fbfbfb", "#967d64", "#647D4B", "#fbfbfb", "#446b44"),
+               sunangle = 290) %>%
+  add_shadow(raymat) %>%
+  add_shadow(ambmat) %>%
+  add_water(detect_water(elmat), color = "white") %>% 
+  plot_map() 
+```
+
+## 绘制北京地区的山体阴影图
+
+由于TDM90数据是分块存放, 需要把几个文件合并成为一个文件. 使用`gdalUtils`的`mosaic_rasters`函数合并多个tif文件.
+
+```{r}
+files <- list.files(datadir,"^TDM1_(.*).tif$", full.names = TRUE)
+
+mosaic_rasters(gdalfile=files,dst_dataset=file.path(datadir,"beijing.tif"),of="GTiff",verbose=TRUE)
+```
+
+读入合并之后的单个文件,
+
+```{r}
+
+# load DEM data
+dgm <- raster::raster(file.path(datadir, "beijing.tif"))
+
+# And convert it to a matrix:
+elmat = raster_to_matrix(dgm)
+
+# compute ray shade
+raymat <- ray_shade(elmat)
+ambmat <- ambient_shade(elmat)
+```
+
+```{r fig.width=12, fig.height=12}
+elmat %>%
+  #sphere_shade(texture = create_texture("#fbfbfb", "#967d64", "#647D4B", "#fbfbfb", "#446b44"), ## v2
+  sphere_shade(texture = create_texture("#ffeede", "#685445", "#304c30", "#364624", "#467d40"),
+               sunangle = 290) %>%
+  add_shadow(raymat) %>%
+  add_shadow(ambmat) %>%
+  add_water(detect_water(elmat), color = "white") %>% 
+  plot_map() 
+```
+
+```{r}
+
+# refer to https://rpubs.com/ricardo_ochoa/416711
+
+# read beijing boundary
+bj = st_read("https://geo.datav.aliyun.com/areas_v2/bound/110000.json")
+
+# mask the elevation
+dgm_masked <- mask(x=dgm, mask=bj)
+
+# crop the elevation
+dgm_masked <- crop(x=dgm_masked, y=extent(bj))
+
+plot(dgm_masked)
+```
+
+```{r}
+
+# And convert it to a matrix:
+elmat_masked = raster_to_matrix(dgm_masked)
+
+# compute ray shade
+raymat_masked <- ray_shade(elmat_masked)
+ambmat_masked <- ambient_shade(elmat_masked)
+```
+
+```{r fig.width=12, fig.height=12}
+elmat_masked %>%
+  #sphere_shade(texture = create_texture("#fbfbfb", "#967d64", "#647D4B", "#fbfbfb", "#446b44"), ## v2
+  sphere_shade(texture = create_texture("#ffeede", "#685445", "#304c30", "#364624", "#467d40"),
+               sunangle = 290) %>%
+  add_shadow(raymat_masked) %>%
+  add_shadow(ambmat_masked) %>%
+  add_water(detect_water(elmat_masked), color = "white") %>% 
+  plot_map() 
+```
+
+```{r fig.width=16, fig.height=16}
+elmat_masked %>%
+  sphere_shade(texture = create_texture("#fbfbfb", "#967d64", "#647D4B", "#fbfbfb", "#446b44"),
+               sunangle = 290) %>%
+  add_shadow(raymat_masked) %>%
+  add_shadow(ambmat_masked) %>%
+  add_water(detect_water(elmat_masked), color = "white") %>% 
+  plot_map() 
+```
+
+```{r}
+
+# 将处理后的数据保存
+writeRaster(dgm_masked, filename=file.path(datadir, "beijing_tdm90_topo.tif"), overwrite=TRUE)
+
+```

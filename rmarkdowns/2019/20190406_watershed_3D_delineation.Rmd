@@ -1,0 +1,126 @@
+---
+title: "流域三维地形分析"
+author: "Kan Dai"
+date: "2019/4/6"
+output: html_notebook
+---
+
+[Batch Watershed Delineation (a start)](http://matthewrvross.com/active.html)
+
+# Lots of packages to load
+The whitebox package, and elevatr, raster, starts should be installed.
+
+```{r, warning=TRUE, message=TRUE, echo=FALSE}
+library(sf)
+library(mapview)
+library(mapedit)
+library(rayshader)
+library(tidyverse)
+library(elevatr)
+library(raster)
+library(whitebox)
+library(stars)
+library(rgl)
+knitr::knit_hooks$set(webgl = hook_webgl)
+```
+
+# Use pour points to download DEM
+[elevatr](https://github.com/jhollist/elevatr)可以从AWS Open Data Terrain Tiles上下载数字高程数据.
+
+```{r}
+sites <- tibble(site=c('estl','fool','estl_nest'),
+                lat=c(39.890265,39.903392,39.885501),
+                long=c(-105.877088,-105.880539,-105.877523)) %>%
+  #Convert to spatial object
+  st_as_sf(coords=c('long','lat'),crs=4326) %>%
+  #transform to NAD83 northern Colorado projection %>%
+  st_transform(26953)
+
+## Use elevatr::get_elev_raster to download data. Z sets the resolution 
+# 14 is highest resolution, 1 is lowest
+fraser_dem <- get_elev_raster(sites, z=12)
+```
+
+```{r}
+#generate a box and check topo basemap for full watershed capture
+fraser_box <- st_bbox(fraser_dem) %>% st_as_sfc()
+
+# Double check that we captured the whole watershed (decrease z if you need to 
+#cover a bigger area, though you will lose resolution)
+mapview(fraser_box) + 
+  mapview(sites)
+```
+
+输出数字高程数据
+```{r}
+#Save files so that whitebox can call the data
+writeRaster(fraser_dem,filename='data/fraser_dem.tif',overwrite=T)
+st_write(sites,'data/sites.shp',delete_layer=T)
+```
+
+# Prep DEM for analysis using whitebox
+```{r}
+#Breach filling
+dem_white <- 'data/fraser_dem.tif'
+
+
+#Fill single cell pits (for hydrologic correctness)
+fill_single_cell_pits(dem_white,'data/breach2.tif')
+
+#Breach depressions (better option that pit filling according to whitebox docu
+#mentation) The flat_increment bit was tricky for me and needed to be tuned.
+breach_depressions('data/breach2.tif','data/breached.tif',flat_increment=.01)
+
+
+#D8 pointer (what is a pointer? a flow direction grid? probably)
+d8_pointer('data/breached.tif','data/d8_pntr.tif')
+
+#D8 flow
+d8_flow_accumulation('data/breached.tif','data/d8_flow.tif',out_type='catchment area')
+
+
+#snap_points
+snap_pour_points('data/sites.shp','data/d8_flow.tif','data/snapped_sites.shp',100)
+
+
+#Watershed delineation as "whole watersheds'
+unnest_basins('data/d8_pntr.tif','data/snapped_sites.shp','data/basins/fraser_sheds.tif')
+```
+
+# Check watershed delineation
+缺乏原始数据，导致程序无法运行完成.
+```{r}
+#Read in flow accumulation algorithm
+fac <- raster('data/d8_flow.tif')
+
+#Get a list of the watershed created by `unnest_basins`
+sheds <- list.files('data/basins',full.names=T)
+
+#Create a function that uses the stars package to transform
+# the raster watershed outlines into shapefiles
+shed_stacker <- function(x){
+  read_stars(sheds[x]) %>%
+    st_as_sf(merge=T,use_integer = T) %>%
+    rename(id=1) %>%
+    group_by(id) %>%
+    summarize()
+}
+
+## Use purrr::map to apply the raster-shapefile transformation to all
+## rasters to a list of shapefiles (map_dfr doesn't play nice with sf for 
+## unknown reasons)
+s <- purrr::map(1:length(sheds),shed_stacker)
+
+#Use do.call to bind these sf objects into a single one
+shape_sheds <- do.call('rbind',s) %>% arrange(id)
+
+
+## Make a map to check if this all makes sense
+
+#subset flow accumulation
+fac_sub <- crop(fac,shape_sheds)
+
+#read in streamstats generated watersheds to check for delineation accuracy
+estl <- st_read('data/estl/layers/globalwatershed.shp')
+```
+
