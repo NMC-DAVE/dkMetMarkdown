@@ -4,6 +4,7 @@ output: html_notebook
 ---
 
 利用`{rayshader}`生成全球任意位置的三维地形图.
+refer to <https://github.com/camartinezbu/30DayChartChallenge2022/blob/f7f7cb1337f2604da2b78d7c920cb318606cf4c6/14-3-dimensional/scripts/1-plot.R>
 
 ## Load libraries
 
@@ -25,6 +26,9 @@ library(elevatr)
 # map center longitude and latitude
 center_lon_lat <- c(102.929, 30.150)
 half_width <- 0.05
+
+center_lon_lat <- c(116.321,39.947)
+half_width <- 0.1
 
 med_bbox <- st_bbox(c(xmin = center_lon_lat[1]-half_width, xmax = center_lon_lat[1]+half_width, 
                       ymin = center_lon_lat[2]-half_width, ymax = center_lon_lat[2]+half_width),
@@ -58,14 +62,16 @@ elev_med_mat <- raster_to_matrix(elev_med)
 # Get highway data
 # https://wiki.openstreetmap.org/wiki/Map_features#Highway
 med_highway <- med_bbox %>%  opq() %>%
-  add_osm_feature("highway") %>%
+  add_osm_feature("highway",
+    c("motorway", "trunk", "primary", "secondary", "tertiary")) %>%
   osmdata_sf()
 med_highway_lines <- med_highway$osm_lines
 
 # Get river data
 # https://wiki.openstreetmap.org/wiki/Map_features#Waterway
 med_rivers <- med_bbox %>% opq() %>%
-  add_osm_feature("waterway") %>%
+  add_osm_feature("waterway",
+    c("river", "stream")) %>%
   osmdata_sf()
 med_river_lines <- med_rivers$osm_lines
 
@@ -114,11 +120,11 @@ plot_map(base_map)
 
 # create highway layer
 med_road_01 <- med_highway_lines %>%
-  filter(highway %in% c("motorway","trunk","primary"))
+  filter(highway %in% c("motorway","trunk"))
 med_road_02 <- med_highway_lines %>%
-  filter(highway %in% c("secondary","tertiary"))
+  filter(highway %in% c("primary", "secondary"))
 med_road_03 <- med_highway_lines %>%
-  filter(highway %in% c("unclassified","residential"))
+  filter(highway %in% c("tertiary"))
 
 road_layer <- generate_line_overlay(med_road_03,extent = extent_zoomed,
                                     linewidth = 2, color="white", 
@@ -138,7 +144,7 @@ road_layer <- generate_line_overlay(med_road_03,extent = extent_zoomed,
 med_river_01 <- med_river_lines %>%
   filter(waterway %in% c("river"))
 med_river_02 <- med_river_lines %>%
-  filter(!waterway %in% c("river"))
+  filter(waterway %in% c("stream"))
 
 water_layer <- generate_line_overlay(med_river_01,extent = extent_zoomed,
                                      linewidth = 2, color="skyblue2", 
@@ -165,7 +171,7 @@ polygon_layer = generate_polygon_overlay(med_building_polygons, extent = extent_
 ```{r fig.height=6, fig.width=6, message=FALSE, warning=FALSE}
 
 base_map %>% 
-  add_overlay(polygon_layer) %>%
+#  add_overlay(polygon_layer) %>%
   add_overlay(water_layer, alphalayer = 0.8) %>% 
   add_overlay(road_layer) %>%
   add_overlay(generate_label_overlay(med_places_points, extent = extent_zoomed,
@@ -179,7 +185,7 @@ base_map %>%
 
 ```{r}
 base_map %>% 
-  add_overlay(polygon_layer) %>%
+#  add_overlay(polygon_layer) %>%
   add_overlay(water_layer, alphalayer = 0.8) %>% 
   add_overlay(road_layer) %>%
   add_overlay(generate_label_overlay(med_places_points, extent = extent_zoomed,
